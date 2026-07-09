@@ -1,0 +1,17 @@
+{
+  "hooks": {
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "cd \"$CLAUDE_PROJECT_DIR\" && git add -A && { git diff --cached --quiet || { git commit -q -m \"自動保存: $(date '+%Y-%m-%d %H:%M')\" && git push -q origin main; }; } 2>/dev/null; true",
+            "timeout": 60,
+            "async": true,
+            "statusMessage": "GitHubに自動保存中..."
+          }
+        ]
+      }
+    ]
+  }
+}
