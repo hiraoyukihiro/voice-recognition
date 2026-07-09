@@ -1,0 +1,21 @@
+# audio I/O
+sounddevice>=0.4.6
+soundfile>=0.12.1
+scipy>=1.11.0
+
+# speech recognition
+openai-whisper>=20231117
+
+# speaker diarization (step 1-3)
+resemblyzer>=0.1.3
+
+# display / communication
+websockets>=12.0
+
+# direction detection (step 5: reSpeaker XVF3800 mic array)
+pyusb>=1.2.1
+libusb-package>=1.0.26; sys_platform == 'win32'
+
+# step 4: uncomment when switching to pyannote
+# pyannote.audio>=3.1.0
+# torch>=2.0.0

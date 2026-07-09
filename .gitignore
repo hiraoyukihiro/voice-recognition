@@ -1,0 +1,25 @@
+# Claude Codeローカル設定
+.claude/settings.local.json
+
+# Python
+__pycache__/
+*.pyc
+.venv/
+venv/
+
+# ログ
+error.log
+*.log
+
+# 音声・処理データ(サイズが大きいため除外)
+input/
+output/
+test_audio/
+
+# サードパーティ製バイナリ(公式サイトから入手可能)
+tools/dfu-util/
+
+# モデルキャッシュ
+*.pt
+*.bin
+*.onnx

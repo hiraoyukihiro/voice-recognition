@@ -1,0 +1,11 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "音声認識UI",
+      "runtimeExecutable": "python",
+      "runtimeArgs": ["tools/serve_web.py"],
+      "port": 8080
+    }
+  ]
+}
