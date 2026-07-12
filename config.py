@@ -14,6 +14,7 @@ WHISPER_MODEL = "small"   # tiny / base / small / medium / large（mediumはこ�
 WHISPER_LANGUAGE = "ja"   # 日本語固定（Noneで自動検出）
 WHISPER_DEVICE = "cpu"
 WHISPER_COMPUTE_TYPE = "int8"  # CPUでの高速化（faster_whisper使用時のみ有効）
+WHISPER_CPU_THREADS = 4        # このPCの論理コア数に合わせる
 
 # --- 方向検知設定 ---
 DOA_MODE = "mic_array"    # dummy / mic_array / even_g2

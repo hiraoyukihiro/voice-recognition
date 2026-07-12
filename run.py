@@ -22,7 +22,7 @@ import config
 # 注記: sd.InputStream（連続録音）はこの環境ではどのバックエンドでも無音になる不具合を確認したため、
 # sd.rec()による固定長チャンク方式を使用する。また0.3秒未満の短い録音はデバイスの
 # ウォームアップ時間だけで終わり実音声を拾えないため、チャンクは短くしすぎない。
-SILENCE_THRESHOLD = 0.0002  # マイク感度が低く、小さい声が0.003に届かず捨てられていたため引き下げ
+SILENCE_THRESHOLD = 0.0001  # マイク感度が低く、小さい声が0.003に届かず捨てられていたため引き下げ
 OVERLAP_RMS_RATIO = 2.0
 
 # --- 音量正規化設定 ---
@@ -57,6 +57,7 @@ if config.WHISPER_ENGINE == "faster_whisper":
         language=config.WHISPER_LANGUAGE,
         device=config.WHISPER_DEVICE,
         compute_type=config.WHISPER_COMPUTE_TYPE,
+        cpu_threads=config.WHISPER_CPU_THREADS,
     )
 else:
     from processing.recognition.whisper_asr import WhisperASR

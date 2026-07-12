@@ -19,17 +19,21 @@ def _is_hallucination(text: str) -> bool:
 
 class FasterWhisperASR(TranscriberBase):
     def __init__(self, model_size: str = "small", language: str = "ja",
-                 device: str = "cpu", compute_type: str = "int8"):
+                 device: str = "cpu", compute_type: str = "int8", cpu_threads: int = 0):
         self.model_size = model_size
         self.language = language
         self.device = device
         self.compute_type = compute_type
+        self.cpu_threads = cpu_threads  # 0 = faster-whisperのデフォルト
         self._model = None
 
     def load(self) -> None:
         from faster_whisper import WhisperModel
-        print(f"[FasterWhisperASR] モデルロード中: {self.model_size} ({self.device}/{self.compute_type}) ...")
-        self._model = WhisperModel(self.model_size, device=self.device, compute_type=self.compute_type)
+        print(f"[FasterWhisperASR] モデルロード中: {self.model_size} ({self.device}/{self.compute_type}, threads={self.cpu_threads}) ...")
+        self._model = WhisperModel(
+            self.model_size, device=self.device, compute_type=self.compute_type,
+            cpu_threads=self.cpu_threads,
+        )
         print("[FasterWhisperASR] ロード完了")
 
     def transcribe(self, audio: np.ndarray, sample_rate: int = 16000) -> str:
@@ -39,6 +43,7 @@ class FasterWhisperASR(TranscriberBase):
             audio,
             language=self.language,
             condition_on_previous_text=False,
+            beam_size=1,
             vad_filter=True,
             vad_parameters={"min_silence_duration_ms": 300, "threshold": 0.3},
             no_speech_threshold=0.7,
