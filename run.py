@@ -6,6 +6,7 @@
 import asyncio
 import http.server
 import threading
+import time
 import webbrowser
 import traceback
 import os
@@ -21,7 +22,7 @@ import config
 # 注記: sd.InputStream（連続録音）はこの環境ではどのバックエンドでも無音になる不具合を確認したため、
 # sd.rec()による固定長チャンク方式を使用する。また0.3秒未満の短い録音はデバイスの
 # ウォームアップ時間だけで終わり実音声を拾えないため、チャンクは短くしすぎない。
-SILENCE_THRESHOLD = 0.0008  # マイク感度が低く、小さい声が0.003に届かず捨てられていたため引き下げ
+SILENCE_THRESHOLD = 0.0004  # マイク感度が低く、小さい声が0.003に届かず捨てられていたため引き下げ
 OVERLAP_RMS_RATIO = 2.0
 
 # --- 音量正規化設定 ---
@@ -82,7 +83,6 @@ last_rms = 0.0
 # --- 方向検知 ---
 if config.DOA_MODE == "mic_array":
     from processing.direction.xvf3800_doa import XVF3800DOA
-    import time as _time
 
     doa = None
     for _attempt in range(5):
@@ -94,7 +94,7 @@ if config.DOA_MODE == "mic_array":
             break
         except RuntimeError as e:
             print(f"  reSpeaker検出リトライ中... ({_attempt + 1}/5) {e}")
-            _time.sleep(1.5)
+            time.sleep(1.5)
 
     if doa is None:
         print("  → reSpeakerが見つからないため、ダミー方向検知にフォールバックします")
@@ -206,7 +206,9 @@ async def pipeline_loop():
 
     while True:
         try:
+            t_rec0 = time.time()
             audio = await loop.run_in_executor(None, record_chunk)
+            t_rec1 = time.time()
             rms = float(np.sqrt(np.mean(audio ** 2)))
 
             if rms < SILENCE_THRESHOLD:
@@ -215,9 +217,12 @@ async def pipeline_loop():
                 continue
 
             audio_amp, gain = await loop.run_in_executor(None, normalize_audio, audio)
+            t_norm1 = time.time()
             print(f"\n[音声検出 RMS={rms:.4f} gain={gain:.1f}倍] 認識中...")
 
             text = await loop.run_in_executor(None, transcribe, audio_amp)
+            t_asr1 = time.time()
+            print(f"  [処理時間] 録音={t_rec1-t_rec0:.2f}s ノイズ除去={t_norm1-t_rec1:.2f}s 認識={t_asr1-t_norm1:.2f}s")
             if not text:
                 last_rms = rms
                 continue
