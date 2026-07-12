@@ -10,7 +10,7 @@ CHANNELS = 1              # モノラル
 
 # --- 音声認識設定 ---
 WHISPER_ENGINE = "faster_whisper"  # faster_whisper / whisper
-WHISPER_MODEL = "tiny"    # tiny / base / small / medium / large（速度最優先。精度とのトレードオフを検証中）
+WHISPER_MODEL = "small"   # tiny / base / small / medium / large（tinyはハルシネーションで逆に遅くなり精度も悪化したため不採用）
 WHISPER_LANGUAGE = "ja"   # 日本語固定（Noneで自動検出）
 WHISPER_DEVICE = "cpu"
 WHISPER_COMPUTE_TYPE = "int8"  # CPUでの高速化（faster_whisper使用時のみ有効）

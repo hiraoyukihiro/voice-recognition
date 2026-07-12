@@ -204,30 +204,43 @@ def start_http_server():
     print(f"[HTTP] http://localhost:{config.WEB_PORT}")
 
 
+async def recorder_loop(queue: asyncio.Queue):
+    """
+    録音だけを専門に繰り返す。認識処理（重い）とは切り離すことで、
+    前の発話を処理している間もマイクを聞き続け、次の発話を取りこぼさないようにする。
+    """
+    loop = asyncio.get_event_loop()
+    while True:
+        audio = await loop.run_in_executor(None, record_chunk)
+        rms = float(np.sqrt(np.mean(audio ** 2)))
+        if rms < SILENCE_THRESHOLD:
+            print(".", end="", flush=True)
+            continue
+        try:
+            queue.put_nowait((audio, rms))
+        except asyncio.QueueFull:
+            print("\n  [警告] 認識処理が追いついていないため、この発話をスキップしました")
+
+
 async def pipeline_loop():
     global last_rms
     loop = asyncio.get_event_loop()
+    queue: asyncio.Queue = asyncio.Queue(maxsize=3)
+    asyncio.create_task(recorder_loop(queue))
     print("\nマイクに向かって話しかけてください（Ctrl+C で停止）\n")
 
     while True:
         try:
-            t_rec0 = time.time()
-            audio = await loop.run_in_executor(None, record_chunk)
-            t_rec1 = time.time()
-            rms = float(np.sqrt(np.mean(audio ** 2)))
+            audio, rms = await queue.get()
 
-            if rms < SILENCE_THRESHOLD:
-                print(".", end="", flush=True)
-                last_rms = 0.0
-                continue
-
+            t0 = time.time()
             audio_amp, gain = await loop.run_in_executor(None, normalize_audio, audio)
             t_norm1 = time.time()
             print(f"\n[音声検出 RMS={rms:.4f} gain={gain:.1f}倍] 認識中...")
 
             text = await loop.run_in_executor(None, transcribe, audio_amp)
             t_asr1 = time.time()
-            print(f"  [処理時間] 録音={t_rec1-t_rec0:.2f}s ノイズ除去={t_norm1-t_rec1:.2f}s 認識={t_asr1-t_norm1:.2f}s")
+            print(f"  [処理時間] ノイズ除去={t_norm1-t0:.2f}s 認識={t_asr1-t_norm1:.2f}s")
             if not text:
                 last_rms = rms
                 continue
