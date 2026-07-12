@@ -22,6 +22,19 @@ SILENCE_THRESHOLD = 0.003
 AUDIO_GAIN = 10.0
 OVERLAP_RMS_RATIO = 2.0
 
+# --- マイクデバイス解決 ---
+# USB機器の抜き差しでMMEの既定デバイスが無音になる不具合を確認したため、
+# 名前+ホストAPIで実際に使えるデバイスを解決する（config.MIC_DEVICE_INDEXは手動指定用に残す）
+from input.mic_input import find_input_device
+
+if config.MIC_DEVICE_INDEX is not None:
+    mic_device_index = config.MIC_DEVICE_INDEX
+else:
+    mic_device_index = find_input_device(config.MIC_DEVICE_NAME)
+    if mic_device_index is None:
+        print(f"  警告: '{config.MIC_DEVICE_NAME}' を含むマイクが見つからないため、システムデフォルトを使用します")
+print(f"  → マイク入力デバイス: {mic_device_index if mic_device_index is not None else 'システムデフォルト'}")
+
 # --- モデルロード ---
 print("=" * 50)
 print("  音声認識システム 起動中...")
@@ -123,7 +136,7 @@ def transcribe(audio: np.ndarray) -> str:
 def record_chunk() -> np.ndarray:
     frames = int(config.SAMPLE_RATE * config.CHUNK_DURATION)
     audio = sd.rec(frames, samplerate=config.SAMPLE_RATE, channels=1,
-                   dtype="float32", device=config.MIC_DEVICE_INDEX)
+                   dtype="float32", device=mic_device_index)
     sd.wait()
     return audio[:, 0]
 
