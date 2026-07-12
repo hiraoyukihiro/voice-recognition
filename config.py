@@ -5,12 +5,12 @@ import os
 MIC_DEVICE_INDEX = None   # None = 自動検出（MIC_DEVICE_NAMEで検索、失敗時のみシステムデフォルト）
 MIC_DEVICE_NAME = "USB Microphone"  # 自動検出時にデバイス名でマッチさせる部分文字列
 SAMPLE_RATE = 16000       # Hz (Whisperは16kHz推奨)
-CHUNK_DURATION = 3.0      # 秒: 一度に処理する音声の長さ（短すぎると文が途中で切れるため）
+CHUNK_DURATION = 2.0      # 秒: 一度に処理する音声の長さ（速度優先で短縮）
 CHANNELS = 1              # モノラル
 
 # --- 音声認識設定 ---
 WHISPER_ENGINE = "faster_whisper"  # faster_whisper / whisper
-WHISPER_MODEL = "medium"  # tiny / base / small / medium / large
+WHISPER_MODEL = "small"   # tiny / base / small / medium / large（mediumはこのCPUで1回20秒以上かかり実用不可だった）
 WHISPER_LANGUAGE = "ja"   # 日本語固定（Noneで自動検出）
 WHISPER_DEVICE = "cpu"
 WHISPER_COMPUTE_TYPE = "int8"  # CPUでの高速化（faster_whisper使用時のみ有効）

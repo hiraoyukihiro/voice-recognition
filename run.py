@@ -22,7 +22,7 @@ import config
 # 注記: sd.InputStream（連続録音）はこの環境ではどのバックエンドでも無音になる不具合を確認したため、
 # sd.rec()による固定長チャンク方式を使用する。また0.3秒未満の短い録音はデバイスの
 # ウォームアップ時間だけで終わり実音声を拾えないため、チャンクは短くしすぎない。
-SILENCE_THRESHOLD = 0.0004  # マイク感度が低く、小さい声が0.003に届かず捨てられていたため引き下げ
+SILENCE_THRESHOLD = 0.0002  # マイク感度が低く、小さい声が0.003に届かず捨てられていたため引き下げ
 OVERLAP_RMS_RATIO = 2.0
 
 # --- 音量正規化設定 ---
@@ -149,18 +149,22 @@ def record_chunk() -> np.ndarray:
     return audio[:, 0]
 
 
+ENABLE_NOISE_REDUCTION = False  # Trueにするとノイズ除去を挟む（小さい声の認識率は上がるが1〜2秒遅くなる）
+
+
 def normalize_audio(audio: np.ndarray) -> tuple:
     """
-    ノイズ除去してからピーク音量基準で正規化する。
-    マイクの物理的な感度が低く強い増幅が必要なため、増幅前にノイズ除去を挟むことで
-    ノイズも一緒に増幅されてしまうのを軽減する。
+    （必要なら）ノイズ除去してからピーク音量基準で正規化する。
+    マイクの物理的な感度が低く強い増幅が必要なため、増幅前にノイズ除去を挟むと
+    ノイズも一緒に増幅されてしまうのを軽減できるが、処理時間が1〜2秒増える。
     戻り値: (正規化後の音声, 適用した増幅率)
     """
-    import noisereduce as nr
-    denoised = nr.reduce_noise(y=audio, sr=config.SAMPLE_RATE)
-    peak = float(np.max(np.abs(denoised))) or 1e-6
+    if ENABLE_NOISE_REDUCTION:
+        import noisereduce as nr
+        audio = nr.reduce_noise(y=audio, sr=config.SAMPLE_RATE)
+    peak = float(np.max(np.abs(audio))) or 1e-6
     gain = min(TARGET_PEAK / peak, MAX_GAIN)
-    return np.clip(denoised * gain, -1.0, 1.0), gain
+    return np.clip(audio * gain, -1.0, 1.0), gain
 
 
 async def ws_handler(websocket, path=None):
