@@ -149,6 +149,20 @@ def record_chunk() -> np.ndarray:
     return audio[:, 0]
 
 
+def normalize_audio(audio: np.ndarray) -> tuple:
+    """
+    ノイズ除去してからピーク音量基準で正規化する。
+    マイクの物理的な感度が低く強い増幅が必要なため、増幅前にノイズ除去を挟むことで
+    ノイズも一緒に増幅されてしまうのを軽減する。
+    戻り値: (正規化後の音声, 適用した増幅率)
+    """
+    import noisereduce as nr
+    denoised = nr.reduce_noise(y=audio, sr=config.SAMPLE_RATE)
+    peak = float(np.max(np.abs(denoised))) or 1e-6
+    gain = min(TARGET_PEAK / peak, MAX_GAIN)
+    return np.clip(denoised * gain, -1.0, 1.0), gain
+
+
 async def ws_handler(websocket, path=None):
     clients.add(websocket)
     print(f"[ブラウザ接続] 現在{len(clients)}台")
@@ -200,9 +214,7 @@ async def pipeline_loop():
                 last_rms = 0.0
                 continue
 
-            peak = float(np.max(np.abs(audio))) or 1e-6
-            gain = min(TARGET_PEAK / peak, MAX_GAIN)
-            audio_amp = np.clip(audio * gain, -1.0, 1.0)
+            audio_amp, gain = await loop.run_in_executor(None, normalize_audio, audio)
             print(f"\n[音声検出 RMS={rms:.4f} gain={gain:.1f}倍] 認識中...")
 
             text = await loop.run_in_executor(None, transcribe, audio_amp)
