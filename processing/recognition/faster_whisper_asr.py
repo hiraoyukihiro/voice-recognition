@@ -4,17 +4,17 @@ from .base import TranscriberBase
 
 # Whisper系モデルが無音・低SNR音声に対して出しがちな定型ハルシネーション。
 # マイク感度が低く強い増幅が必要な環境では音量では判別できないため文面で弾く。
-_HALLUCINATION_PHRASES = {
-    "ご視聴ありがとうございました",
-    "ご視聴いただきありがとうございました",
-    "最後までご視聴いただきありがとうございました",
-    "チャンネル登録お願いします",
-    "チャンネル登録よろしくお願いします",
-    "字幕視聴ありがとうございました",
-    "この動画が良かったら高評価",
-    "終わり",
-    "おわり",
-}
+# 言い回しに揺れがあるため、完全一致ではなくキーワードの組み合わせで判定する。
+_HALLUCINATION_KEYWORD_SETS = [
+    {"視聴", "ありがとう"},
+    {"チャンネル登録"},
+    {"高評価"},
+    {"字幕", "ありがとう"},
+]
+
+
+def _is_hallucination(text: str) -> bool:
+    return any(all(kw in text for kw in kws) for kws in _HALLUCINATION_KEYWORD_SETS)
 
 
 class FasterWhisperASR(TranscriberBase):
@@ -44,6 +44,6 @@ class FasterWhisperASR(TranscriberBase):
             no_speech_threshold=0.7,
         )
         text = "".join(seg.text for seg in segments).strip()
-        if text.rstrip("。、!?！？") in _HALLUCINATION_PHRASES:
+        if _is_hallucination(text):
             return ""
         return text
