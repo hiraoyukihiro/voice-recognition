@@ -4,6 +4,7 @@
 ブラウザで http://localhost:8080 が自動で開く。
 """
 import asyncio
+import collections
 import http.server
 import threading
 import webbrowser
@@ -19,8 +20,21 @@ import config
 
 # --- 設定 ---
 SILENCE_THRESHOLD = 0.003
-AUDIO_GAIN = 10.0
 OVERLAP_RMS_RATIO = 2.0
+
+# --- VAD（発話区間検出）設定 ---
+# 固定長チャンクではなく、無音が続くまで録音を続ける方式にして
+# 短い発話の体感遅延を減らす（発話終了からHANGOVER_DURATION秒後に確定）
+VAD_FRAME_DURATION = 0.1     # 秒: VAD判定の最小単位
+PRE_ROLL_FRAMES = 3          # 発話開始前のフレームを含めて頭切れを防ぐ
+HANGOVER_DURATION = 0.6      # 秒: これだけ無音が続いたら発話終了とみなす
+MAX_UTTERANCE_DURATION = 8.0 # 秒: 1発話の最大長（無音判定が来ない場合の上限）
+MIN_UTTERANCE_DURATION = 0.4 # 秒: これより短い発話はノイズとして捨てる
+
+# --- 音量正規化設定 ---
+# 固定倍率だと声の大小でWhisperの精度が変わるため、ピーク音量基準で正規化する
+TARGET_PEAK = 0.7
+MAX_GAIN = 30.0
 
 # --- マイクデバイス解決 ---
 # USB機器の抜き差しでMMEの既定デバイスが無音になる不具合を確認したため、
@@ -133,12 +147,53 @@ def transcribe(audio: np.ndarray) -> str:
     return asr.transcribe(audio, config.SAMPLE_RATE)
 
 
-def record_chunk() -> np.ndarray:
-    frames = int(config.SAMPLE_RATE * config.CHUNK_DURATION)
-    audio = sd.rec(frames, samplerate=config.SAMPLE_RATE, channels=1,
-                   dtype="float32", device=mic_device_index)
-    sd.wait()
-    return audio[:, 0]
+def record_utterance(stream: sd.InputStream):
+    """
+    発話区間（VAD）を検出して1発話分を録音する。
+    無音のまま終わった場合や短すぎる場合はNoneを返す。
+    戻り値: (音声データ, 発話中の最大RMS) または None
+    """
+    frame_samples = int(config.SAMPLE_RATE * VAD_FRAME_DURATION)
+    hangover_frames = int(HANGOVER_DURATION / VAD_FRAME_DURATION)
+    max_frames = int(MAX_UTTERANCE_DURATION / VAD_FRAME_DURATION)
+
+    pre_roll = collections.deque(maxlen=PRE_ROLL_FRAMES)
+    buffer = []
+    is_speaking = False
+    silence_run = 0
+    peak_rms = 0.0
+
+    for _ in range(max_frames):
+        frame, _ = stream.read(frame_samples)
+        frame = frame[:, 0].copy()
+        rms = float(np.sqrt(np.mean(frame ** 2)))
+
+        if not is_speaking:
+            if rms >= SILENCE_THRESHOLD:
+                is_speaking = True
+                buffer.extend(pre_roll)
+                buffer.append(frame)
+                peak_rms = rms
+            else:
+                pre_roll.append(frame)
+            continue
+
+        buffer.append(frame)
+        peak_rms = max(peak_rms, rms)
+        if rms < SILENCE_THRESHOLD:
+            silence_run += 1
+            if silence_run >= hangover_frames:
+                break
+        else:
+            silence_run = 0
+
+    if not is_speaking:
+        return None
+
+    audio = np.concatenate(buffer)
+    if len(audio) < config.SAMPLE_RATE * MIN_UTTERANCE_DURATION:
+        return None
+    return audio, peak_rms
 
 
 async def ws_handler(websocket, path=None):
@@ -182,43 +237,46 @@ async def pipeline_loop():
     loop = asyncio.get_event_loop()
     print("\nマイクに向かって話しかけてください（Ctrl+C で停止）\n")
 
-    while True:
-        try:
-            audio = await loop.run_in_executor(None, record_chunk)
-            rms = float(np.sqrt(np.mean(audio ** 2)))
+    with sd.InputStream(samplerate=config.SAMPLE_RATE, channels=1,
+                         dtype="float32", device=mic_device_index) as stream:
+        while True:
+            try:
+                result = await loop.run_in_executor(None, record_utterance, stream)
+                if result is None:
+                    print(".", end="", flush=True)
+                    last_rms = 0.0
+                    continue
 
-            if rms < SILENCE_THRESHOLD:
-                print(".", end="", flush=True)
-                last_rms = 0.0
-                continue
+                audio, rms = result
+                peak = float(np.max(np.abs(audio))) or 1e-6
+                gain = min(TARGET_PEAK / peak, MAX_GAIN)
+                audio_amp = np.clip(audio * gain, -1.0, 1.0)
+                print(f"\n[音声検出 RMS={rms:.4f} gain={gain:.1f}倍] 認識中...")
 
-            audio_amp = np.clip(audio * AUDIO_GAIN, -1.0, 1.0)
-            print(f"\n[音声検出 RMS={rms:.4f}] 認識中...")
+                text = await loop.run_in_executor(None, transcribe, audio_amp)
+                if not text:
+                    last_rms = rms
+                    continue
 
-            text = await loop.run_in_executor(None, transcribe, audio_amp)
-            if not text:
+                direction = doa.estimate(audio_amp)
+                speaker_id = await loop.run_in_executor(
+                    None, identify_speaker, audio_amp, rms
+                )
                 last_rms = rms
+
+                print(f"[{speaker_id} | {direction:.0f}°] {text}")
+                await broadcast({
+                    "type": "subtitle",
+                    "speaker_id": speaker_id,
+                    "text": text,
+                    "direction": direction,
+                })
+
+            except KeyboardInterrupt:
+                raise
+            except Exception:
+                traceback.print_exc()
                 continue
-
-            direction = doa.estimate(audio_amp)
-            speaker_id = await loop.run_in_executor(
-                None, identify_speaker, audio_amp, rms
-            )
-            last_rms = rms
-
-            print(f"[{speaker_id} | {direction:.0f}°] {text}")
-            await broadcast({
-                "type": "subtitle",
-                "speaker_id": speaker_id,
-                "text": text,
-                "direction": direction,
-            })
-
-        except KeyboardInterrupt:
-            raise
-        except Exception:
-            traceback.print_exc()
-            continue
 
 
 async def main():
