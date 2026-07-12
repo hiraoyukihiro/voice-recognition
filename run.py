@@ -28,8 +28,18 @@ print("  音声認識システム 起動中...")
 print("=" * 50)
 
 print("\n[1/3] Whisperモデルをロード中...")
-import whisper
-asr_model = whisper.load_model(config.WHISPER_MODEL)
+if config.WHISPER_ENGINE == "faster_whisper":
+    from processing.recognition.faster_whisper_asr import FasterWhisperASR
+    asr = FasterWhisperASR(
+        model_size=config.WHISPER_MODEL,
+        language=config.WHISPER_LANGUAGE,
+        device=config.WHISPER_DEVICE,
+        compute_type=config.WHISPER_COMPUTE_TYPE,
+    )
+else:
+    from processing.recognition.whisper_asr import WhisperASR
+    asr = WhisperASR(model_size=config.WHISPER_MODEL, language=config.WHISPER_LANGUAGE)
+asr.load()
 
 print("[2/3] 話者識別モデルをロード中...")
 from resemblyzer import VoiceEncoder, preprocess_wav
@@ -37,7 +47,7 @@ encoder = VoiceEncoder()
 
 print("[3/3] ウォームアップ中（初回のみ時間がかかります）...")
 _dummy = np.zeros(config.SAMPLE_RATE * 3, dtype=np.float32)
-asr_model.transcribe(_dummy, language=config.WHISPER_LANGUAGE, fp16=False, verbose=False)
+asr.transcribe(_dummy, config.SAMPLE_RATE)
 
 print("\n全モデルロード完了\n")
 
@@ -107,14 +117,7 @@ def identify_speaker(audio: np.ndarray, current_rms: float) -> str:
 
 
 def transcribe(audio: np.ndarray) -> str:
-    result = asr_model.transcribe(
-        audio,
-        language=config.WHISPER_LANGUAGE,
-        fp16=False,
-        verbose=False,
-        condition_on_previous_text=False,
-    )
-    return result["text"].strip()
+    return asr.transcribe(audio, config.SAMPLE_RATE)
 
 
 def record_chunk() -> np.ndarray:

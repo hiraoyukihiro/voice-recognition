@@ -4,7 +4,8 @@ soundfile>=0.12.1
 scipy>=1.11.0
 
 # speech recognition
-openai-whisper>=20231117
+faster-whisper>=1.0.0
+openai-whisper>=20231117  # WHISPER_ENGINE="whisper" 用（フォールバック）
 
 # speaker diarization (step 1-3)
 resemblyzer>=0.1.3
