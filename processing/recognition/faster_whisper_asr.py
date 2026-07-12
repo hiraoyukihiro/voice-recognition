@@ -2,6 +2,20 @@
 import numpy as np
 from .base import TranscriberBase
 
+# Whisper系モデルが無音・低SNR音声に対して出しがちな定型ハルシネーション。
+# マイク感度が低く強い増幅が必要な環境では音量では判別できないため文面で弾く。
+_HALLUCINATION_PHRASES = {
+    "ご視聴ありがとうございました",
+    "ご視聴いただきありがとうございました",
+    "最後までご視聴いただきありがとうございました",
+    "チャンネル登録お願いします",
+    "チャンネル登録よろしくお願いします",
+    "字幕視聴ありがとうございました",
+    "この動画が良かったら高評価",
+    "終わり",
+    "おわり",
+}
+
 
 class FasterWhisperASR(TranscriberBase):
     def __init__(self, model_size: str = "small", language: str = "ja",
@@ -29,4 +43,7 @@ class FasterWhisperASR(TranscriberBase):
             vad_parameters={"min_silence_duration_ms": 300, "threshold": 0.3},
             no_speech_threshold=0.7,
         )
-        return "".join(seg.text for seg in segments).strip()
+        text = "".join(seg.text for seg in segments).strip()
+        if text.rstrip("。、!?！？") in _HALLUCINATION_PHRASES:
+            return ""
+        return text

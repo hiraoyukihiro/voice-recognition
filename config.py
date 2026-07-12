@@ -5,7 +5,7 @@ import os
 MIC_DEVICE_INDEX = None   # None = 自動検出（MIC_DEVICE_NAMEで検索、失敗時のみシステムデフォルト）
 MIC_DEVICE_NAME = "USB Microphone"  # 自動検出時にデバイス名でマッチさせる部分文字列
 SAMPLE_RATE = 16000       # Hz (Whisperは16kHz推奨)
-CHUNK_DURATION = 2.0      # 秒: 一度に処理する音声の長さ
+CHUNK_DURATION = 3.0      # 秒: 一度に処理する音声の長さ（短すぎると文が途中で切れるため）
 CHANNELS = 1              # モノラル
 
 # --- 音声認識設定 ---
