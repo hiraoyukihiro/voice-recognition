@@ -78,9 +78,9 @@ print("\n全モデルロード完了\n")
 speaker_embeddings: dict[str, np.ndarray] = {}
 speaker_count = 0
 SIMILARITY_THRESHOLD = 0.75       # これ以上なら確実に同一話者とみなす
-NEW_SPEAKER_THRESHOLD = 0.55      # これ未満なら確実に新しい話者。間は「不確実」として直近の推定話者に割り当てる
+NEW_SPEAKER_THRESHOLD = 0.35      # これ未満なら確実に新しい話者。マイク音質が悪く同一人物でも声の特徴がブレるため低めに設定
 EMBEDDING_UPDATE_RATE = 0.3       # 高確信度で一致した際、話者の声の特徴を少しずつ更新する重み
-NEW_SPEAKER_COOLDOWN = 3.0        # 秒: 新規話者登録の最短間隔。同時発話で声が混ざったチャンクを新規話者として連発登録するのを防ぐ
+NEW_SPEAKER_COOLDOWN = 8.0        # 秒: 新規話者登録の最短間隔。声のブレによる誤った新規話者登録の連発を防ぐ
 last_speaker_id = "speaker_1"
 last_rms = 0.0
 last_new_speaker_time = 0.0
