@@ -45,8 +45,8 @@ class FasterWhisperASR(TranscriberBase):
             condition_on_previous_text=False,
             beam_size=1,
             vad_filter=True,
-            vad_parameters={"min_silence_duration_ms": 300, "threshold": 0.3},
-            no_speech_threshold=0.7,
+            vad_parameters={"min_silence_duration_ms": 300, "threshold": 0.4},
+            no_speech_threshold=0.6,
         )
         text = "".join(seg.text for seg in segments).strip()
         if _is_hallucination(text):
