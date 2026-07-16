@@ -43,7 +43,7 @@ class FasterWhisperASR(TranscriberBase):
             audio,
             language=self.language,
             condition_on_previous_text=False,
-            beam_size=1,
+            beam_size=2,
             vad_filter=True,
             vad_parameters={"min_silence_duration_ms": 300, "threshold": 0.3},
             no_speech_threshold=0.7,
