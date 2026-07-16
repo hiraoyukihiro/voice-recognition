@@ -310,9 +310,11 @@ async def pipeline_loop():
                 continue
 
             direction = doa.estimate(audio_amp)
+            t_spk0 = time.time()
             speaker_id = await loop.run_in_executor(
                 None, identify_speaker, audio_amp, rms
             )
+            print(f"  [処理時間] 話者判定={time.time()-t_spk0:.2f}s")
             last_rms = rms
 
             is_continuation = (
