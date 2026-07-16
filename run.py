@@ -229,11 +229,16 @@ async def recorder_loop(queue: asyncio.Queue):
     """
     録音だけを専門に繰り返す。認識処理（重い）とは切り離すことで、
     前の発話を処理している間もマイクを聞き続け、次の発話を取りこぼさないようにする。
+    seq（録音回数の連番）は無音チャンクも含めて必ず+1されるため、
+    2つのチャンクのseqが連続していれば、その間に無音（＝発話の切れ目）が
+    無かったことを意味する（＝同じ文の続きの可能性が高い）。
     """
     loop = asyncio.get_event_loop()
+    seq = 0
     while True:
         audio = await loop.run_in_executor(None, record_chunk)
         rms = float(np.sqrt(np.mean(audio ** 2)))
+        seq += 1
         if rms < SILENCE_THRESHOLD:
             print(".", end="", flush=True)
             continue
@@ -244,7 +249,13 @@ async def recorder_loop(queue: asyncio.Queue):
                 print("\n  [警告] 処理が追いつかないため、古い発話を破棄して最新の発話を優先します")
             except asyncio.QueueEmpty:
                 pass
-        queue.put_nowait((audio, rms))
+        queue.put_nowait((audio, rms, seq))
+
+
+# 秒: これだけ次の発話チャンクが来なければ、文が終わったとみなして表示を確定する。
+# CHUNK_DURATIONより短いと、録音中の続きのチャンクを待たずに文を分割してしまうため、
+# 最低でもCHUNK_DURATIONより長くする。
+FLUSH_TIMEOUT = config.CHUNK_DURATION + 1.5
 
 
 async def pipeline_loop():
@@ -254,9 +265,34 @@ async def pipeline_loop():
     asyncio.create_task(recorder_loop(queue))
     print("\nマイクに向かって話しかけてください（Ctrl+C で停止）\n")
 
+    # 長い文がチャンクの境界で分割されても1つの字幕としてまとめて表示するためのバッファ
+    pending_text = ""
+    pending_speaker_id = None
+    pending_direction = None
+    pending_last_seq = None
+
+    async def flush():
+        nonlocal pending_text, pending_speaker_id, pending_direction, pending_last_seq
+        if pending_text:
+            print(f"[{pending_speaker_id} | {pending_direction:.0f}°] {pending_text}")
+            await broadcast({
+                "type": "subtitle",
+                "speaker_id": pending_speaker_id,
+                "text": pending_text,
+                "direction": pending_direction,
+            })
+        pending_text = ""
+        pending_speaker_id = None
+        pending_direction = None
+        pending_last_seq = None
+
     while True:
         try:
-            audio, rms = await queue.get()
+            try:
+                audio, rms, seq = await asyncio.wait_for(queue.get(), timeout=FLUSH_TIMEOUT)
+            except asyncio.TimeoutError:
+                await flush()
+                continue
 
             t0 = time.time()
             audio_amp, gain = await loop.run_in_executor(None, normalize_audio, audio)
@@ -276,13 +312,20 @@ async def pipeline_loop():
             )
             last_rms = rms
 
-            print(f"[{speaker_id} | {direction:.0f}°] {text}")
-            await broadcast({
-                "type": "subtitle",
-                "speaker_id": speaker_id,
-                "text": text,
-                "direction": direction,
-            })
+            is_continuation = (
+                pending_text
+                and pending_speaker_id == speaker_id
+                and pending_last_seq is not None
+                and seq == pending_last_seq + 1
+            )
+            if is_continuation:
+                pending_text += text
+            else:
+                await flush()
+                pending_text = text
+                pending_speaker_id = speaker_id
+            pending_direction = direction
+            pending_last_seq = seq
 
         except KeyboardInterrupt:
             raise
