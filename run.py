@@ -77,9 +77,13 @@ print("\n全モデルロード完了\n")
 # --- 話者管理 ---
 speaker_embeddings: dict[str, np.ndarray] = {}
 speaker_count = 0
-SIMILARITY_THRESHOLD = 0.75
+SIMILARITY_THRESHOLD = 0.75       # これ以上なら確実に同一話者とみなす
+NEW_SPEAKER_THRESHOLD = 0.55      # これ未満なら確実に新しい話者。間は「不確実」として直近の推定話者に割り当てる
+EMBEDDING_UPDATE_RATE = 0.3       # 高確信度で一致した際、話者の声の特徴を少しずつ更新する重み
+NEW_SPEAKER_COOLDOWN = 3.0        # 秒: 新規話者登録の最短間隔。同時発話で声が混ざったチャンクを新規話者として連発登録するのを防ぐ
 last_speaker_id = "speaker_1"
 last_rms = 0.0
+last_new_speaker_time = 0.0
 
 # --- 方向検知 ---
 if config.DOA_MODE == "mic_array":
@@ -113,7 +117,7 @@ clients: set = set()
 
 
 def identify_speaker(audio: np.ndarray, current_rms: float) -> str:
-    global speaker_count, last_speaker_id, last_rms
+    global speaker_count, last_speaker_id, last_rms, last_new_speaker_time
     try:
         if last_rms > SILENCE_THRESHOLD and current_rms > last_rms * OVERLAP_RMS_RATIO:
             return last_speaker_id
@@ -127,11 +131,28 @@ def identify_speaker(audio: np.ndarray, current_rms: float) -> str:
             if score > best_score:
                 best_score = score
                 best_id = spk_id
-        if best_id is None or best_score < SIMILARITY_THRESHOLD:
+
+        now = time.time()
+        if best_id is None or (
+            best_score < NEW_SPEAKER_THRESHOLD
+            and now - last_new_speaker_time > NEW_SPEAKER_COOLDOWN
+        ):
+            # 確実に新しい話者。ただし直近で新規登録したばかりの場合は
+            # 同時発話で声が混ざったブレの可能性が高いため、登録を抑制してcooldown中は既存話者に割り当てる
             speaker_count += 1
             best_id = f"speaker_{speaker_count}"
             speaker_embeddings[best_id] = embedding
+            last_new_speaker_time = now
             print(f"  → 新しい話者を検出: {best_id}")
+        elif best_score >= SIMILARITY_THRESHOLD:
+            # 高確信度の一致：声の特徴を少しずつ更新し、自然な声の変化に追従させる
+            speaker_embeddings[best_id] = (
+                (1 - EMBEDDING_UPDATE_RATE) * speaker_embeddings[best_id]
+                + EMBEDDING_UPDATE_RATE * embedding
+            )
+        # NEW_SPEAKER_THRESHOLD以上SIMILARITY_THRESHOLD未満（不確実な一致）の場合は
+        # 同時発話などで声が混ざった可能性が高いため、既存の推定話者に割り当てるだけで登録は更新しない
+
         last_speaker_id = best_id
         return best_id
     except Exception as e:
