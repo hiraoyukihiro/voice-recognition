@@ -237,10 +237,14 @@ async def recorder_loop(queue: asyncio.Queue):
         if rms < SILENCE_THRESHOLD:
             print(".", end="", flush=True)
             continue
-        try:
-            queue.put_nowait((audio, rms))
-        except asyncio.QueueFull:
-            print("\n  [警告] 認識処理が追いついていないため、この発話をスキップしました")
+        if queue.full():
+            # 処理が追いつかない時は、古い発話ではなく常に最新の発話を優先する
+            try:
+                queue.get_nowait()
+                print("\n  [警告] 処理が追いつかないため、古い発話を破棄して最新の発話を優先します")
+            except asyncio.QueueEmpty:
+                pass
+        queue.put_nowait((audio, rms))
 
 
 async def pipeline_loop():
