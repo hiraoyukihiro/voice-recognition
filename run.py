@@ -304,6 +304,10 @@ async def pipeline_loop():
             print(f"  [処理時間] ノイズ除去={t_norm1-t0:.2f}s 認識={t_asr1-t_norm1:.2f}s")
             if not text:
                 last_rms = rms
+                # 文字が得られなくても、直前と同じ話者が続いている可能性があるチャンクなら
+                # 連番だけは更新し、次の本物のチャンクが「文の続き」と正しく判定されるようにする
+                if pending_text and pending_last_seq is not None and seq == pending_last_seq + 1:
+                    pending_last_seq = seq
                 continue
 
             direction = doa.estimate(audio_amp)
