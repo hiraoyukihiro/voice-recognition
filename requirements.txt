@@ -8,8 +8,9 @@ faster-whisper>=1.0.0
 openai-whisper>=20231117  # WHISPER_ENGINE="whisper" 用（フォールバック）
 noisereduce>=3.0.0        # マイク感度が低いため増幅前にノイズ除去する
 
-# speaker diarization (step 1-3)
-resemblyzer>=0.1.3
+# speaker diarization
+resemblyzer>=0.1.3        # DIARIZER_MODE="resemblyzer" 用（フォールバック）
+pyannote.audio>=3.1.0     # DIARIZER_MODE="pyannote" 用。利用にはHuggingFaceの利用規約同意とトークンが必要
 
 # display / communication
 websockets>=12.0
@@ -17,7 +18,3 @@ websockets>=12.0
 # direction detection (step 5: reSpeaker XVF3800 mic array)
 pyusb>=1.2.1
 libusb-package>=1.0.26; sys_platform == 'win32'
-
-# step 4: uncomment when switching to pyannote
-# pyannote.audio>=3.1.0
-# torch>=2.0.0

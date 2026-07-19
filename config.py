@@ -29,7 +29,7 @@ WEBSOCKET_PORT = 8765
 WEB_PORT = 8080
 
 # --- 話者分離設定 ---
-DIARIZER_MODE = "resemblyzer"  # resemblyzer / pyannote
+DIARIZER_MODE = "pyannote"  # resemblyzer / pyannote
 
 # --- テストファイル ---
 TEST_AUDIO_DIR = os.path.join(os.path.dirname(__file__), "test_audio")

@@ -64,8 +64,25 @@ else:
 asr.load()
 
 print("[2/3] 話者識別モデルをロード中...")
-from resemblyzer import VoiceEncoder, preprocess_wav
-encoder = VoiceEncoder()
+if config.DIARIZER_MODE == "pyannote":
+    import getpass
+    hf_token = getpass.getpass(
+        "HuggingFaceアクセストークンを入力してください（画面には表示されません。ファイルには保存されません）: "
+    )
+    from processing.diarization.pyannote_diarizer import PyannoteEmbedder
+    embedder = PyannoteEmbedder(hf_token)
+    embedder.load()
+    hf_token = None  # メモリ上の参照を手放す（load()側でも既に破棄済み）
+
+    def get_embedding(audio: np.ndarray) -> np.ndarray:
+        return embedder.embed(audio, config.SAMPLE_RATE)
+else:
+    from resemblyzer import VoiceEncoder, preprocess_wav
+    encoder = VoiceEncoder()
+
+    def get_embedding(audio: np.ndarray) -> np.ndarray:
+        wav = preprocess_wav(audio, source_sr=config.SAMPLE_RATE)
+        return encoder.embed_utterance(wav)
 
 print("[3/3] ウォームアップ中（初回のみ時間がかかります）...")
 _dummy = np.zeros(config.SAMPLE_RATE * 3, dtype=np.float32)
@@ -120,10 +137,11 @@ def identify_speaker(audio: np.ndarray, current_rms: float) -> str:
     try:
         if last_rms > SILENCE_THRESHOLD and current_rms > last_rms * OVERLAP_RMS_RATIO:
             return last_speaker_id
-        wav = preprocess_wav(audio, source_sr=config.SAMPLE_RATE)
-        if len(wav) < config.SAMPLE_RATE * 0.5:
+        if len(audio) < config.SAMPLE_RATE * 0.5:
             return last_speaker_id
-        embedding = encoder.embed_utterance(wav)
+        embedding = get_embedding(audio)
+        # resemblyzer/pyannoteどちらでも比較できるよう、正規化してコサイン類似度として扱う
+        embedding = embedding / (np.linalg.norm(embedding) or 1.0)
         best_id, best_score = None, -1.0
         for spk_id, emb in speaker_embeddings.items():
             score = float(np.dot(embedding, emb))
