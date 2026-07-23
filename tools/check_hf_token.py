@@ -30,3 +30,19 @@ try:
     print(f"OK: ファイル一覧を取得できました: {files}")
 except Exception as e:
     print(f"NG: ファイル一覧の取得に失敗: {e}")
+
+print("\n=== 4. pyannote.audio の Model.from_pretrained を token= で試す ===")
+try:
+    from pyannote.audio import Model
+    model = Model.from_pretrained("pyannote/embedding", token=token)
+    print("OK: token= でロードできました")
+except Exception as e:
+    print(f"NG: token= で失敗: {type(e).__name__}: {e}")
+
+print("\n=== 5. pyannote.audio の Model.from_pretrained を use_auth_token= で試す ===")
+try:
+    from pyannote.audio import Model
+    model = Model.from_pretrained("pyannote/embedding", use_auth_token=token)
+    print("OK: use_auth_token= でロードできました")
+except Exception as e:
+    print(f"NG: use_auth_token= で失敗: {type(e).__name__}: {e}")
