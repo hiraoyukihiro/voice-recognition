@@ -17,6 +17,7 @@ python run.py
 python tools/list_mics.py        # 接続中のマイク一覧
 python tools/check_xvf3800.py    # reSpeaker XVF3800のUSB制御・オーディオ入力の検出確認
 python tools/check_hf_token.py   # HuggingFaceトークン・pyannote.audioアクセスの診断（トークンはgetpass入力のみ）
+python tools/check_vosk.py       # Voskモデルのロード確認＋マイク録音での文字起こしテスト
 ```
 
 ---
@@ -142,7 +143,8 @@ queue maxsize = 8          # 処理待ち音声チャンクの上限。溢れた
 │   │   └── xvf3800_doa.py          reSpeaker実機DOA
 │   ├── recognition/
 │   │   ├── whisper_asr.py          openai-whisper実装（フォールバック）
-│   │   └── faster_whisper_asr.py   faster-whisper実装（メイン）
+│   │   ├── faster_whisper_asr.py   faster-whisper実装
+│   │   └── vosk_asr.py             Vosk実装（メイン。無料・オフライン・軽量）
 │   └── diarization/
 │       ├── resemblyzer_diarizer.py resemblyzer実装
 │       └── pyannote_diarizer.py    pyannote.audio(embedding)実装
@@ -153,5 +155,6 @@ queue maxsize = 8          # 処理待ち音声チャンクの上限。溢れた
     ├── list_mics.py                 マイク一覧
     ├── check_xvf3800.py             reSpeaker接続診断
     ├── check_hf_token.py            HuggingFaceトークン診断
+    ├── check_vosk.py                Voskモデルロード・文字起こし確認
     └── serve_web.py                 output/web/ 単体プレビュー用サーバー
 ```
