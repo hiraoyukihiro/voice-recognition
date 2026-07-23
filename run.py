@@ -284,7 +284,8 @@ FLUSH_TIMEOUT = config.CHUNK_DURATION + 1.5
 async def pipeline_loop():
     global last_rms
     loop = asyncio.get_event_loop()
-    queue: asyncio.Queue = asyncio.Queue(maxsize=3)
+    # 多少の詰まりは全部処理できるよう猶予を持たせつつ、無限に遅延が蓄積しないよう上限は設ける
+    queue: asyncio.Queue = asyncio.Queue(maxsize=8)
     asyncio.create_task(recorder_loop(queue))
     print("\nマイクに向かって話しかけてください（Ctrl+C で停止）\n")
 
