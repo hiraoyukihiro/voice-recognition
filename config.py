@@ -19,7 +19,9 @@ WHISPER_CPU_THREADS = 4        # このPCの論理コア数に合わせる
 # --- Vosk設定（WHISPER_ENGINE="vosk"時のみ使用） ---
 # 完全無料・オフラインで動作し、Whisperよりモデルが軽量なためこのPCのCPUでも動きやすい。
 # モデルは https://alphacephei.com/vosk/models から別途ダウンロードして配置する（pipには含まれない）。
-VOSK_MODEL_PATH = os.path.join(os.path.dirname(__file__), "models", "vosk-model-small-ja-0.22")
+# 注意: Vosk(Kaldi)はWindowsで非ASCIIパスを正しく扱えないため、
+# プロジェクトフォルダ名「音声認識」配下には置けない。ASCIIのみの場所を指定すること。
+VOSK_MODEL_PATH = r"C:\Users\user\vosk-models\vosk-model-small-ja-0.22"
 
 # --- 方向検知設定 ---
 DOA_MODE = "mic_array"    # dummy / mic_array / even_g2

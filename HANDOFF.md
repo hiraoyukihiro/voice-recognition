@@ -27,7 +27,7 @@ python tools/check_hf_token.py   # HuggingFaceトークン・pyannote.audioア�
 | 項目 | 内容 |
 |---|---|
 | 3層分離 | 入力(input/)・処理(processing/)・出力(output/)を維持 |
-| 音声認識 | `openai-whisper` → `faster-whisper` に切り替え済み（`small`モデル、`beam_size=1`、`int8`） |
+| 音声認識 | `openai-whisper` → `faster-whisper` に切り替え済み（`small`モデル、`beam_size=1`、`int8`）。2026-07-23、携帯性・無料運用を優先し`vosk`エンジンを追加、デフォルトを`config.WHISPER_ENGINE="vosk"`に変更（完全無料・オフライン・軽量。`vosk-model-small-ja-0.22`使用） |
 | 話者分離 | `resemblyzer`（デフォルト。2026-07-23、pyannoteの激重フリーズ回避のため戻した）と`pyannote.audio`（`pyannote/embedding`）の両対応。`config.DIARIZER_MODE`で切替 |
 | 方向検知 | reSpeaker XVF3800実機のDOA取得に対応（`DOA_MODE="mic_array"`、未接続時はダミーに自動フォールバック） |
 | マイク自動検出 | `input/mic_input.py`の`find_input_device()`で、デバイス名+ホストAPIから自動解決 |
@@ -114,7 +114,13 @@ queue maxsize = 8          # 処理待ち音声チャンクの上限。溢れた
   という問題があった。現状はマイク+DOA制御の両方が動く状態まで来ているが、**USB切断・再接続を繰り返すと
   再発する可能性がある**ため、`tools/check_xvf3800.py`で毎回接続確認してから使うこと
 
-### 4. Even G2対応（SDK連携は未着手）
+### 4. Voskモデルの配置場所（重要・Windows固有の地雷）
+- Vosk(内部でKaldiのC++実装)はWindowsで非ASCIIパスのモデル読み込みに失敗する。
+  このプロジェクトのフォルダ名「音声認識」自体が非ASCIIのため、**プロジェクト内(`models/`等)にはVoskモデルを置けない**
+- そのため`config.VOSK_MODEL_PATH`は `C:\Users\user\vosk-models\vosk-model-small-ja-0.22` というASCIIのみの固定パスを直接指定している。他のPCに移行する際もこの制約を忘れないこと
+- 精度が足りない場合は同じ場所に`vosk-model-ja-0.22`(1GB、高精度版)を追加ダウンロードし、`VOSK_MODEL_PATH`を切り替えれば良い
+
+### 5. Even G2対応（SDK連携は未着手）
 - 出力UI（`output/web/`）はデザイン仕様通り実装済み、PCブラウザで動作確認済み
 - `@evenrealities/even_hub_sdk`の組み込みは未着手（このPCにNode.js未インストールのため）
 - Python側(`run.py`の`broadcast()`)は新WebSocket形式（`speaker_id`数値、`direction`-180〜180、`is_active`）に
