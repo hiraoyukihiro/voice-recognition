@@ -31,7 +31,10 @@ class XVF3800DOA(DirectionEstimatorBase):
     config.py の XVF3800_ANGLE_OFFSET / XVF3800_INVERT を調整する。
     """
 
-    TIMEOUT = 100000
+    # USB制御転送は本来数ms〜数十msで返るはずのため、詰まった場合に
+    # イベントループ全体を長時間ブロックしないよう短いタイムアウトにする
+    # （以前100秒に設定されており、詰まると認識・字幕表示全体が長時間停止していた）。
+    TIMEOUT = 1000
 
     def __init__(self, angle_offset: float = 0.0, invert: bool = False,
                  vendor_id: int = VENDOR_ID, product_id: int = PRODUCT_ID):

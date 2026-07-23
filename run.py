@@ -334,7 +334,7 @@ async def pipeline_loop():
                     pending_last_seq = seq
                 continue
 
-            direction = doa.estimate(audio_amp)
+            direction = await loop.run_in_executor(None, doa.estimate, audio_amp)
             t_spk0 = time.time()
             speaker_id = await loop.run_in_executor(
                 None, identify_speaker, audio_amp, rms
