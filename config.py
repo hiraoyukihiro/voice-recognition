@@ -29,7 +29,10 @@ WEBSOCKET_PORT = 8765
 WEB_PORT = 8080
 
 # --- 話者分離設定 ---
-DIARIZER_MODE = "pyannote"  # resemblyzer / pyannote
+# pyannoteは精度が高いが数百秒単位でフリーズする既知の不具合があり、
+# フリーズ中はキューが溢れ続けて長時間認識が止まる原因になるためresemblyzerに戻した。
+# pyannote側の実装は残してあるので、値を"pyannote"に戻せばいつでも再度試せる。
+DIARIZER_MODE = "resemblyzer"  # resemblyzer / pyannote
 
 # --- テストファイル ---
 TEST_AUDIO_DIR = os.path.join(os.path.dirname(__file__), "test_audio")

@@ -10,7 +10,13 @@ _HALLUCINATION_KEYWORD_SETS = [
     {"チャンネル登録"},
     {"高評価"},
     {"字幕", "ありがとう"},
+    {"お疲れ様"},
+    {"ご覧", "ありがとう"},
 ]
+
+# Whisperが無音・低SNR区間に対して「発話らしさが低い」と自己申告するスコア。
+# キーワード一致では拾いきれない未知のハルシネーション文言を、この確信度で弾く。
+_NO_SPEECH_PROB_THRESHOLD = 0.6
 
 
 def _is_hallucination(text: str) -> bool:
@@ -43,12 +49,14 @@ class FasterWhisperASR(TranscriberBase):
             audio,
             language=self.language,
             condition_on_previous_text=False,
-            beam_size=2,
+            beam_size=1,
             vad_filter=True,
             vad_parameters={"min_silence_duration_ms": 300, "threshold": 0.3},
             no_speech_threshold=0.7,
         )
-        text = "".join(seg.text for seg in segments).strip()
+        text = "".join(
+            seg.text for seg in segments if seg.no_speech_prob < _NO_SPEECH_PROB_THRESHOLD
+        ).strip()
         if _is_hallucination(text):
             return ""
         return text

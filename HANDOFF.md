@@ -28,12 +28,12 @@ python tools/check_hf_token.py   # HuggingFaceトークン・pyannote.audioア�
 |---|---|
 | 3層分離 | 入力(input/)・処理(processing/)・出力(output/)を維持 |
 | 音声認識 | `openai-whisper` → `faster-whisper` に切り替え済み（`small`モデル、`beam_size=1`、`int8`） |
-| 話者分離 | `resemblyzer`（デフォルト）と`pyannote.audio`（`pyannote/embedding`）の両対応。`config.DIARIZER_MODE`で切替 |
+| 話者分離 | `resemblyzer`（デフォルト。2026-07-23、pyannoteの激重フリーズ回避のため戻した）と`pyannote.audio`（`pyannote/embedding`）の両対応。`config.DIARIZER_MODE`で切替 |
 | 方向検知 | reSpeaker XVF3800実機のDOA取得に対応（`DOA_MODE="mic_array"`、未接続時はダミーに自動フォールバック） |
 | マイク自動検出 | `input/mic_input.py`の`find_input_device()`で、デバイス名+ホストAPIから自動解決 |
 | 録音/認識の並行処理 | `recorder_loop`と`pipeline_loop`を分離し、認識処理中もマイクを聞き続ける |
 | 長文の自動結合 | チャンク境界をまたいだ発話を連番(seq)で検出し、1つの字幕にまとめて表示 |
-| 幻覚(ハルシネーション)対策 | キーワードベースで「ご視聴ありがとうございました」等の定型文を除去 |
+| 幻覚(ハルシネーション)対策 | キーワードベースで「ご視聴ありがとうございました」「お疲れ様でした」等の定型文を除去＋セグメント単位の`no_speech_prob`しきい値フィルタ |
 | 出力UI | デザイン仕様に沿って刷新済み（576×288、字幕上部3行+コンパス右下、ライト/ダーク切替） |
 
 ### ハードウェア構成
@@ -95,7 +95,9 @@ queue maxsize = 8          # 処理待ち音声チャンクの上限。溢れた
   - クラウド音声認識API（Google/Azure等）への切り替え
   - より高性能なPC/GPUの用意
 
-### 2. pyannote.audio導入に伴う不安定さ（調査中）
+### 2. pyannote.audio導入に伴う不安定さ（2026-07-23時点でresemblyzerに戻して回避中）
+- **対応**: 「原因不明の激重フリーズ」がキュー溢れ・長時間無認識の最有力原因だったため、`config.DIARIZER_MODE`を`"resemblyzer"`に戻した。pyannote側の実装は残してあり、いつでも切り戻せる
+- 以下は切り戻す場合の既知の注意点（調査中のまま）
 - **HuggingFace関連の既知の落とし穴**（解決済みだが再発しうる）:
   - `huggingface_hub`が1.x系だと`pyannote.audio 4.0.7`のgatedモデル取得が`401 GatedRepoError`で失敗する
     → `pip install "huggingface_hub<1.0"`で固定（`requirements.txt`に記載済み）
