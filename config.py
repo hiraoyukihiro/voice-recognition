@@ -9,12 +9,17 @@ CHUNK_DURATION = 1.5      # 秒: 一度に処理する音声の長さ（reSpeake
 CHANNELS = 1              # モノラル
 
 # --- 音声認識設定 ---
-WHISPER_ENGINE = "faster_whisper"  # faster_whisper / whisper
+WHISPER_ENGINE = "vosk"  # faster_whisper / whisper / vosk
 WHISPER_MODEL = "small"   # tiny / base / small / medium / large（tinyはハルシネーションで逆に遅くなり精度も悪化したため不採用）
 WHISPER_LANGUAGE = "ja"   # 日本語固定（Noneで自動検出）
 WHISPER_DEVICE = "cpu"
 WHISPER_COMPUTE_TYPE = "int8"  # CPUでの高速化（faster_whisper使用時のみ有効）
 WHISPER_CPU_THREADS = 4        # このPCの論理コア数に合わせる
+
+# --- Vosk設定（WHISPER_ENGINE="vosk"時のみ使用） ---
+# 完全無料・オフラインで動作し、Whisperよりモデルが軽量なためこのPCのCPUでも動きやすい。
+# モデルは https://alphacephei.com/vosk/models から別途ダウンロードして配置する（pipには含まれない）。
+VOSK_MODEL_PATH = os.path.join(os.path.dirname(__file__), "models", "vosk-model-small-ja-0.22")
 
 # --- 方向検知設定 ---
 DOA_MODE = "mic_array"    # dummy / mic_array / even_g2

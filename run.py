@@ -48,7 +48,7 @@ print("=" * 50)
 print("  音声認識システム 起動中...")
 print("=" * 50)
 
-print("\n[1/3] Whisperモデルをロード中...")
+print("\n[1/3] 音声認識モデルをロード中...")
 if config.WHISPER_ENGINE == "faster_whisper":
     from processing.recognition.faster_whisper_asr import FasterWhisperASR
     asr = FasterWhisperASR(
@@ -58,6 +58,9 @@ if config.WHISPER_ENGINE == "faster_whisper":
         compute_type=config.WHISPER_COMPUTE_TYPE,
         cpu_threads=config.WHISPER_CPU_THREADS,
     )
+elif config.WHISPER_ENGINE == "vosk":
+    from processing.recognition.vosk_asr import VoskASR
+    asr = VoskASR(model_path=config.VOSK_MODEL_PATH, sample_rate=config.SAMPLE_RATE)
 else:
     from processing.recognition.whisper_asr import WhisperASR
     asr = WhisperASR(model_size=config.WHISPER_MODEL, language=config.WHISPER_LANGUAGE)
