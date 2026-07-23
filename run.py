@@ -149,6 +149,7 @@ def identify_speaker(audio: np.ndarray, current_rms: float) -> str:
                 best_score = score
                 best_id = spk_id
 
+        print(f"  [話者スコア] best_id={best_id} best_score={best_score:.3f}")
         now = time.time()
         if best_id is None or (
             best_score < NEW_SPEAKER_THRESHOLD
