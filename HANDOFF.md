@@ -1,5 +1,5 @@
 # 音声認識システム 引き継ぎメモ
-更新日: 2026-07-09
+更新日: 2026-07-23
 
 ## プロジェクト場所
 `C:\Users\user\Desktop\音声認識\`
@@ -9,28 +9,46 @@
 cd C:\Users\user\Desktop\音声認識
 python run.py
 ```
+起動途中で `DIARIZER_MODE = "pyannote"` の場合、HuggingFaceアクセストークンの入力を求められる（画面には表示されない。ファイルにも保存されない。入力後Enter）。
 ブラウザが自動で開く。開かない場合は `http://localhost:8080` を手動で開く。
+
+診断ツール:
+```
+python tools/list_mics.py        # 接続中のマイク一覧
+python tools/check_xvf3800.py    # reSpeaker XVF3800のUSB制御・オーディオ入力の検出確認
+python tools/check_hf_token.py   # HuggingFaceトークン・pyannote.audioアクセスの診断（トークンはgetpass入力のみ）
+```
 
 ---
 
-## 現在の状態
+## 現在の状態（2026-07-23時点）
 
-### 完了済みステップ
-| ステップ | 内容 | 備考 |
-|---|---|---|
-| 1 | プロジェクト雛形 | 3レイヤー分離済み |
-| 2 | マイク録音・再生確認 | USBマイク認識済み |
-| 3 | 音声認識（Whisper base） | 動作確認済み |
-| 4 | 話者分離（resemblyzer） | 動作確認済み |
-| 5 | 方向検知ダミー | DummyDOA(sweep)で実装済み |
-| 6 | ブラウザ表示UI | コンパス＋字幕色分け実装済み |
-| 7 | 全体結合 | run.py で一括起動 |
+### 完了済み
+| 項目 | 内容 |
+|---|---|
+| 3層分離 | 入力(input/)・処理(processing/)・出力(output/)を維持 |
+| 音声認識 | `openai-whisper` → `faster-whisper` に切り替え済み（`small`モデル、`beam_size=1`、`int8`） |
+| 話者分離 | `resemblyzer`（デフォルト）と`pyannote.audio`（`pyannote/embedding`）の両対応。`config.DIARIZER_MODE`で切替 |
+| 方向検知 | reSpeaker XVF3800実機のDOA取得に対応（`DOA_MODE="mic_array"`、未接続時はダミーに自動フォールバック） |
+| マイク自動検出 | `input/mic_input.py`の`find_input_device()`で、デバイス名+ホストAPIから自動解決 |
+| 録音/認識の並行処理 | `recorder_loop`と`pipeline_loop`を分離し、認識処理中もマイクを聞き続ける |
+| 長文の自動結合 | チャンク境界をまたいだ発話を連番(seq)で検出し、1つの字幕にまとめて表示 |
+| 幻覚(ハルシネーション)対策 | キーワードベースで「ご視聴ありがとうございました」等の定型文を除去 |
+| 出力UI | デザイン仕様に沿って刷新済み（576×288、字幕上部3行+コンパス右下、ライト/ダーク切替） |
 
-### 直近の未解決問題
-- `http://localhost:8080` を開くと「Directory listing for /」が表示される場合がある
-  - **原因**: HTTPサーバーが `output/web/` ではなくルートを配信している
-  - **対処**: `run.py` の `start_http_server()` を修正済み（最新版で解決のはず）
-  - **確認**: ブラウザでコンパスと字幕エリアが表示されればOK
+### ハードウェア構成
+- **メインPC**: Intel Core i5-4310M（2014年頃、2コア4スレッド）、メモリ8.5GB
+  - → **Whisperの認識処理そのものが1回あたり約7秒かかるのがこのPCの性能上の限界**。これ以上はモデル/パラメータの調整では大きく縮まらないことを確認済み（medium/tiny/beam_size/CPUスレッド数など一通り試した結果）
+- **マイク**: 2種類を切り替えて使用中
+  1. 汎用USBマイク（感度が低く、増幅が必要。`MIC_DEVICE_NAME="USB Microphone"`）
+  2. **reSpeaker XVF3800 USB 4-Mic Array**（`MIC_DEVICE_NAME="reSpeaker"`）: マイクとしてもDOA(方向検知)実機としても使用可能。ただし過去にWindows側のドライバー・電源供給に起因する接続不安定の問題があった（USBポート直挿し推奨）
+- マイクを差し替えた際は、`config.py`の`MIC_DEVICE_NAME`と、`run.py`冒頭の`SILENCE_THRESHOLD`/`MAX_GAIN`を、使用マイクに合わせて変更すること（下記「切り替え早見表」参照）
+
+### マイク切り替え早見表
+| マイク | `MIC_DEVICE_NAME` | `SILENCE_THRESHOLD`(run.py) | `MAX_GAIN`(run.py) |
+|---|---|---|---|
+| 汎用USBマイク（感度低い） | `"USB Microphone"` | `0.0001` | `100.0` |
+| reSpeaker XVF3800 | `"reSpeaker"` | `0.003` | `20.0` |
 
 ---
 
@@ -39,96 +57,93 @@ python run.py
 ### 使用モデル・ライブラリ
 | 用途 | ライブラリ | 設定 |
 |---|---|---|
-| 音声認識 | openai-whisper | モデル: base、言語: ja |
-| 話者分離 | resemblyzer | 類似度閾値: 0.75 |
-| 方向検知 | ダミー実装 | DummyDOA(mode="sweep") |
+| 音声認識 | faster-whisper | モデル: small、言語: ja、beam_size=1、int8、cpu_threads=4 |
+| 話者分離 | resemblyzer or pyannote.audio(pyannote/embedding) | `config.DIARIZER_MODE`で切替。しきい値は方式ごとに別設定 |
+| 方向検知 | reSpeaker XVF3800実機 or ダミー | `config.DOA_MODE`で切替 |
+| ノイズ除去 | noisereduce | `run.py`の`ENABLE_NOISE_REDUCTION`で有効/無効切替（現在False。有効にすると+1〜2秒） |
 | 通信 | websockets | ポート: 8765 |
-| Web表示 | HTML/CSS/JS | ポート: 8080 |
+| Web表示 | HTML/CSS/JS | ポート: 8080（`tools/serve_web.py`でキャッシュ無効化配信） |
 
-### 重要な設定値（config.py）
+### 話者分離のしきい値（run.py内、DIARIZER_MODEごとに自動切替）
 ```python
-WHISPER_MODEL = "base"
-SAMPLE_RATE = 16000
-CHUNK_DURATION = 3.0
-WEBSOCKET_PORT = 8765
-WEB_PORT = 8080
-MIC_DEVICE_INDEX = None  # デフォルトマイク（USBマイク）
+# resemblyzer
+SIMILARITY_THRESHOLD = 0.75   # これ以上で同一話者
+NEW_SPEAKER_THRESHOLD = 0.35  # これ未満で新規話者
+
+# pyannote（resemblyzerよりスコアが全体的に低く出る傾向。調整途上）
+SIMILARITY_THRESHOLD = 0.5
+NEW_SPEAKER_THRESHOLD = 0.15
 ```
+`NEW_SPEAKER_COOLDOWN = 8.0`秒（新規話者登録の連発防止）、`EMBEDDING_UPDATE_RATE = 0.3`（高確信度一致時に声の特徴を少しずつ更新）。
 
-### 音量設定（run.py）
+### 主要パイプライン設定（run.py / config.py）
 ```python
-SILENCE_THRESHOLD = 0.003  # これ以下は無音とみなす
-AUDIO_GAIN = 10.0           # マイク音量が小さいため10倍増幅
+CHUNK_DURATION = 1.5       # 秒（reSpeaker接続時に短縮を検証中。短すぎると認識漏れ増加に注意）
+FLUSH_TIMEOUT = CHUNK_DURATION + 1.5  # これだけ次のチャンクが来なければ文を確定
+queue maxsize = 8          # 処理待ち音声チャンクの上限。溢れたら最新優先で古いものを破棄
 ```
 
 ---
 
-## 既知の制限と今後の課題
+## 既知の問題・未解決事項
 
-### 同時発話問題 → reSpeaker XVF3800 対応中
-- **現状**: reSpeaker XVF3800 USB 4-Mic Array を購入済み（2026-07-09時点でPC未接続）
-- **実装済み**: `processing/direction/xvf3800_doa.py`（USB制御転送でAEC_AZIMUTH_VALUESを読み取り、実機DOA角度を取得）
-- **依存パッケージ**: `pyusb`, `libusb-package`（インストール済み、requirements.txtにも追加済み）
-- **接続後の手順**:
-  1. USBでPCに接続
-  2. `python tools/check_xvf3800.py` を実行し、①USB制御インターフェースが検出されること、②オーディオ入力一覧に reSpeaker/XVF/XMOS を含むデバイスが出ることを確認
-  3. `config.py` の `MIC_DEVICE_INDEX` を確認できたreSpeakerの番号に変更
-  4. `config.py` の `DOA_MODE` を `"mic_array"` に変更
-  5. 角度がズレている場合は `XVF3800_ANGLE_OFFSET` / `XVF3800_INVERT` を調整して校正
-- **未検証**: 実機接続後の動作確認（DOA角度の向き・オフセットの校正、複数話者同時発話時の精度）
+### 1. Whisper認識速度がこのPCの性能限界（根本解決は困難）
+- 1発話(1.5〜3秒)あたり約7秒かかる。continuous に話し続けると処理待ちキューが溜まり、
+  古い発話が破棄されるか、字幕が遅延して蓄積する（`queue maxsize=8`で多少緩和）
+- 試して効果がなかった/悪化したもの: `tiny`モデル（幻覚で逆に遅くなり精度も悪化）、チャンク1.2秒（認識漏れ増加）
+- 抜本解決には次のいずれかが必要（ユーザーは一旦ローカル処理継続を選択）:
+  - クラウド音声認識API（Google/Azure等）への切り替え
+  - より高性能なPC/GPUの用意
 
-### 精度向上
-- Whisper `base` → `small` に変更で精度向上（ただし処理速度が落ちる）
-- `config.py` の `WHISPER_MODEL = "small"` に変更するだけ
+### 2. pyannote.audio導入に伴う不安定さ（調査中）
+- **HuggingFace関連の既知の落とし穴**（解決済みだが再発しうる）:
+  - `huggingface_hub`が1.x系だと`pyannote.audio 4.0.7`のgatedモデル取得が`401 GatedRepoError`で失敗する
+    → `pip install "huggingface_hub<1.0"`で固定（`requirements.txt`に記載済み）
+  - `omegaconf`が自動インストールされないため`pip install omegaconf`が別途必要（`requirements.txt`に記載済み）
+  - `pyannote/embedding`は`pyannote/speaker-diarization-3.1`等とは**別に**HuggingFace上でゲート同意が必要
+- **しきい値が未調整**: pyannote版のSIMILARITY_THRESHOLD/NEW_SPEAKER_THRESHOLDは暫定値。実データでの再調整が必要
+- **原因不明の激重フリーズ**: 通常7秒程度の認識処理が、稀に132秒・517秒など異常に長くかかることがある。
+  熱暴走ではないことは確認済み。メモリは8.5GB中6GB使用と余裕は少なめ（pyannote.audio(PyTorch)導入で使用量増加）。
+  Windows Defenderのリアルタイムスキャン等、他の要因も疑われるが未特定
+- ユーザーは「pyannote.audioの安定化を続ける」か「resemblyzerに戻す」かを保留中
 
-### pyannote.audio への切り替え（話者分離の精度向上）
-1. HuggingFace アカウント作成: https://huggingface.co
-2. 利用規約への同意が必要なモデル:
-   - https://huggingface.co/pyannote/segmentation-3.0
-   - https://huggingface.co/pyannote/speaker-diarization-3.1
-3. アクセストークン取得後、`pip install pyannote.audio`
-4. `processing/diarization/resemblyzer_diarizer.py` を差し替え
+### 3. reSpeaker XVF3800の接続不安定性
+- 過去にWindows側でドライバーが一切当たらない（Code 28）、Zadigで解決したがマイクとして認識されなくなる、
+  という問題があった。現状はマイク+DOA制御の両方が動く状態まで来ているが、**USB切断・再接続を繰り返すと
+  再発する可能性がある**ため、`tools/check_xvf3800.py`で毎回接続確認してから使うこと
 
-### Even G2 対応（デザイン仕様反映済み、SDK連携は未着手）
-- **2026-07-09時点**: デザイン仕様書に基づき `output/web/`（index.html/style.css/app.js）を全面刷新済み
-  - レイアウト: 576×288px固定ステージ、字幕上部3行＋コンパス右下68×68px
-  - 字幕: 話者色ドット(5px) + 白矢印(8方向) + 話者色テキスト、非アクティブ行は透明度0.4
-  - 話者6人分の色分け（A〜F、ダーク/ライト両対応）、Even G2向けに話者記号(A/B/C…)も表示
-  - コンパス: リング＋前後左右(漢字)ラベル＋緑の針（CSSアニメーションで滑らかに回転）
-  - ライト/ダーク: 自動(prefers-color-scheme)＋手動切替ボタン（自動/ライト/ダーク）、localStorageに保存
-  - WebSocketデータ形式を新仕様（`speaker_id`数値0-5, `direction`-180〜180, `is_active`）に対応。
-    旧形式（文字列speaker_id, type:"subtitle"）も後方互換で受信可能
-  - 画面右上に「サンプル表示」ボタン：バックエンド未接続でもダミーデータで見た目を確認できるシミュレーターモード
-- **未対応**: `@evenrealities/even_hub_sdk`（npmパッケージ）の組み込み
-  - 理由: このPCにNode.js未インストール。SDKはVite等のビルド環境が前提
-  - 対応が必要になったら: Node.js 20 LTS以降をインストール →
-    `npm install -g @evenrealities/evenhub-cli @evenrealities/evenhub-simulator` →
-    SDKの初期化コード追加（現状は素のHTML/CSS/JSのみ。ビルド不要な範囲で実装済み）
-- **要注意**: Python側（`run.py`の`broadcast()`）はまだ旧WebSocket形式で送信している。
-  実際に新デザインで話者色・矢印・is_active を正しく反映させるには、`run.py`側の送信データも
-  新形式（speaker_idを0始まりの数値に、directionを-180〜180に、is_activeを追加）に合わせる必要がある
-- 出力レイヤー差し替え対象（将来Even G2以外に変える場合）: `output/browser_display.py` と `output/web/`
-
-### 開発用サーバーのキャッシュ対策
-- `tools/serve_web.py` を追加（`output/web/`をキャッシュ無効ヘッダー付き・マルチスレッドで配信）
-- `.claude/launch.json` のプレビュー設定もこちらを使うよう変更済み
-- `run.py`の`start_http_server()`にも同様のキャッシュ無効化ヘッダーと`ThreadingHTTPServer`化を適用済み
-  （シングルスレッドサーバーだとブラウザの複数同時接続でハングする不具合があったため）
+### 4. Even G2対応（SDK連携は未着手）
+- 出力UI（`output/web/`）はデザイン仕様通り実装済み、PCブラウザで動作確認済み
+- `@evenrealities/even_hub_sdk`の組み込みは未着手（このPCにNode.js未インストールのため）
+- Python側(`run.py`の`broadcast()`)は新WebSocket形式（`speaker_id`数値、`direction`-180〜180、`is_active`）に
+  まだ対応していない。現状は旧形式（文字列speaker_id、`type:"subtitle"`）のまま送信しており、
+  フロントエンドの新デザインとは後方互換のみで正式対応していない
 
 ---
 
 ## フォルダ構成
 ```
 音声認識/
-├── run.py                  ★ メイン起動スクリプト
-├── config.py               設定ファイル
-├── input/                  入力レイヤー（マイク/ファイル/ダミー）
+├── run.py                          ★ メイン起動スクリプト
+├── config.py                       設定ファイル
+├── input/
+│   └── mic_input.py                マイク抽象化・自動デバイス検出
 ├── processing/
-│   ├── direction/          方向検知（今はダミー）
-│   ├── recognition/        Whisper音声認識
-│   └── diarization/        話者分離（resemblyzer）
+│   ├── direction/
+│   │   ├── dummy_doa.py            ダミー方向検知
+│   │   └── xvf3800_doa.py          reSpeaker実機DOA
+│   ├── recognition/
+│   │   ├── whisper_asr.py          openai-whisper実装（フォールバック）
+│   │   └── faster_whisper_asr.py   faster-whisper実装（メイン）
+│   └── diarization/
+│       ├── resemblyzer_diarizer.py resemblyzer実装
+│       └── pyannote_diarizer.py    pyannote.audio(embedding)実装
 ├── output/
-│   ├── browser_display.py  WebSocket送信
-│   └── web/                ブラウザUI（HTML/CSS/JS）
-└── tools/                  動作確認スクリプト群
+│   ├── browser_display.py          WebSocket送信
+│   └── web/                        ブラウザUI（HTML/CSS/JS）
+└── tools/
+    ├── list_mics.py                 マイク一覧
+    ├── check_xvf3800.py             reSpeaker接続診断
+    ├── check_hf_token.py            HuggingFaceトークン診断
+    └── serve_web.py                 output/web/ 単体プレビュー用サーバー
 ```
