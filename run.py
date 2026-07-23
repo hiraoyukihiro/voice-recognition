@@ -91,10 +91,15 @@ asr.transcribe(_dummy, config.SAMPLE_RATE)
 print("\n全モデルロード完了\n")
 
 # --- 話者管理 ---
+# しきい値はresemblyzerとpyannote.audioで埋め込みベクトルのスコア傾向が異なるため別々に設定する
 speaker_embeddings: dict[str, np.ndarray] = {}
 speaker_count = 0
-SIMILARITY_THRESHOLD = 0.75       # これ以上なら確実に同一話者とみなす
-NEW_SPEAKER_THRESHOLD = 0.35      # これ未満なら確実に新しい話者。マイク音質が悪く同一人物でも声の特徴がブレるため低めに設定
+if config.DIARIZER_MODE == "pyannote":
+    SIMILARITY_THRESHOLD = 0.5    # これ以上なら確実に同一話者とみなす（pyannote用に調整中）
+    NEW_SPEAKER_THRESHOLD = 0.15  # これ未満なら確実に新しい話者（pyannote用に調整中）
+else:
+    SIMILARITY_THRESHOLD = 0.75   # これ以上なら確実に同一話者とみなす
+    NEW_SPEAKER_THRESHOLD = 0.35  # これ未満なら確実に新しい話者。マイク音質が悪く同一人物でも声の特徴がブレるため低めに設定
 EMBEDDING_UPDATE_RATE = 0.3       # 高確信度で一致した際、話者の声の特徴を少しずつ更新する重み
 NEW_SPEAKER_COOLDOWN = 8.0        # 秒: 新規話者登録の最短間隔。声のブレによる誤った新規話者登録の連発を防ぐ
 last_speaker_id = "speaker_1"
