@@ -5,7 +5,7 @@ import os
 MIC_DEVICE_INDEX = None   # None = 自動検出（MIC_DEVICE_NAMEで検索、失敗時のみシステムデフォルト）
 MIC_DEVICE_NAME = "USB Microphone"  # 自動検出時にデバイス名でマッチさせる部分文字列（reSpeakerを外し通常のUSBマイクに変更）
 SAMPLE_RATE = 16000       # Hz (Whisperは16kHz推奨)
-CHUNK_DURATION = 1.5      # 秒: 一度に処理する音声の長さ（reSpeakerで音質が上がったため再度短縮を検証）
+CHUNK_DURATION = 4.0      # 秒: 一度に処理する音声の長さ（短いと単語の途中で切れて誤認識するため、字幕速度より精度優先で長めに）
 CHANNELS = 1              # モノラル
 
 # --- 音声認識設定 ---
