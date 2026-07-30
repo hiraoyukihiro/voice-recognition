@@ -50,14 +50,20 @@ if mic_device_index is not None:
 else:
     _mic_device_name = sd.query_devices(kind="input")["name"]
 
-for _substr, _profile in config.MIC_PROFILES.items():
-    if _substr in _mic_device_name:
-        _active_mic_profile = _profile
-        print(f"  → マイク設定: '{_substr}' 用のプロファイルを自動適用（しきい値={_profile['silence_threshold']}, 増幅上限={_profile['max_gain']}倍）")
-        break
+if config.FORCE_MIC_PROFILE is not None:
+    _active_mic_profile = config.MIC_PROFILES.get(config.FORCE_MIC_PROFILE, config.DEFAULT_MIC_PROFILE)
+    print(f"  → マイク設定: '{config.FORCE_MIC_PROFILE}' 用のプロファイルを手動指定で強制適用"
+          f"（しきい値={_active_mic_profile['silence_threshold']}, 増幅上限={_active_mic_profile['max_gain']}倍）"
+          f"　※config.FORCE_MIC_PROFILE=Noneで自動判定に戻せます")
 else:
-    _active_mic_profile = config.DEFAULT_MIC_PROFILE
-    print(f"  → マイク設定: 未知のマイク（{_mic_device_name}）のため標準値を使用（しきい値={_active_mic_profile['silence_threshold']}, 増幅上限={_active_mic_profile['max_gain']}倍）")
+    for _substr, _profile in config.MIC_PROFILES.items():
+        if _substr in _mic_device_name:
+            _active_mic_profile = _profile
+            print(f"  → マイク設定: '{_substr}' 用のプロファイルを自動適用（しきい値={_profile['silence_threshold']}, 増幅上限={_profile['max_gain']}倍）")
+            break
+    else:
+        _active_mic_profile = config.DEFAULT_MIC_PROFILE
+        print(f"  → マイク設定: 未知のマイク（{_mic_device_name}）のため標準値を使用（しきい値={_active_mic_profile['silence_threshold']}, 増幅上限={_active_mic_profile['max_gain']}倍）")
 
 SILENCE_THRESHOLD = _active_mic_profile["silence_threshold"]
 MAX_GAIN = _active_mic_profile["max_gain"]

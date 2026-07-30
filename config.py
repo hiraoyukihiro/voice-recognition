@@ -13,6 +13,10 @@ MIC_PROFILES = {
     "USB Microphone": {"silence_threshold": 0.0045, "max_gain": 50.0},  # 音量が小さいマイク
 }
 DEFAULT_MIC_PROFILE = {"silence_threshold": 0.003, "max_gain": 20.0}  # 未知のマイク用の標準値
+
+# 実機を差し替えなくても、上のMIC_PROFILESのキー名（例:"USB Microphone"）を指定すれば
+# 自動判定を無視してそのプロファイルを強制的に使う。「元に戻して」と言われたらNoneに戻せばよい。
+FORCE_MIC_PROFILE = "USB Microphone"  # None = 実際に接続されているマイクから自動判定
 SAMPLE_RATE = 16000       # Hz (Whisperは16kHz推奨)
 CHUNK_DURATION = 4.0      # 秒: 一度に処理する音声の長さ（短いと単語の途中で切れて誤認識するため、字幕速度より精度優先で長めに）
 CHANNELS = 1              # モノラル
