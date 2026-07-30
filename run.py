@@ -22,13 +22,11 @@ import config
 # 注記: sd.InputStream（連続録音）はこの環境ではどのバックエンドでも無音になる不具合を確認したため、
 # sd.rec()による固定長チャンク方式を使用する。また0.3秒未満の短い録音はデバイスの
 # ウォームアップ時間だけで終わり実音声を拾えないため、チャンクは短くしすぎない。
-SILENCE_THRESHOLD = 0.0045  # 今の環境ノイズフロア(RMS約0.003〜0.008)より上に設定。下げすぎると無音を検知できず字幕が確定されなくなる
 OVERLAP_RMS_RATIO = 2.0
 
 # --- 音量正規化設定 ---
 # 固定倍率だと声の大小でWhisperの精度が変わるため、ピーク音量基準で正規化する
 TARGET_PEAK = 0.7
-MAX_GAIN = 50.0  # USBマイク(音量小さめ)のため上限を上げる。ログ上gain=20.0(旧上限)で頭打ちになりTARGET_PEAKまで届いていなかった
 
 # --- マイクデバイス解決 ---
 # USB機器の抜き差しでMMEの既定デバイスが無音になる不具合を確認したため、
@@ -42,6 +40,27 @@ else:
     if mic_device_index is None:
         print(f"  警告: '{config.MIC_DEVICE_NAME}' を含むマイクが見つからないため、システムデフォルトを使用します")
 print(f"  → マイク入力デバイス: {mic_device_index if mic_device_index is not None else 'システムデフォルト'}")
+
+# --- マイクごとの自動設定 ---
+# マイクの機種によって音量特性が違うため、実際に選ばれたデバイスの名前から機種を判定し、
+# config.MIC_PROFILESに定義された音量しきい値・増幅上限を自動で適用する
+# （マイクを差し替えても手動で設定し直さなくてよいように）。
+if mic_device_index is not None:
+    _mic_device_name = sd.query_devices(mic_device_index)["name"]
+else:
+    _mic_device_name = sd.query_devices(kind="input")["name"]
+
+for _substr, _profile in config.MIC_PROFILES.items():
+    if _substr in _mic_device_name:
+        _active_mic_profile = _profile
+        print(f"  → マイク設定: '{_substr}' 用のプロファイルを自動適用（しきい値={_profile['silence_threshold']}, 増幅上限={_profile['max_gain']}倍）")
+        break
+else:
+    _active_mic_profile = config.DEFAULT_MIC_PROFILE
+    print(f"  → マイク設定: 未知のマイク（{_mic_device_name}）のため標準値を使用（しきい値={_active_mic_profile['silence_threshold']}, 増幅上限={_active_mic_profile['max_gain']}倍）")
+
+SILENCE_THRESHOLD = _active_mic_profile["silence_threshold"]
+MAX_GAIN = _active_mic_profile["max_gain"]
 
 # --- モデルロード ---
 print("=" * 50)
