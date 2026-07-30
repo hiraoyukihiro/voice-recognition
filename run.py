@@ -22,7 +22,7 @@ import config
 # 注記: sd.InputStream（連続録音）はこの環境ではどのバックエンドでも無音になる不具合を確認したため、
 # sd.rec()による固定長チャンク方式を使用する。また0.3秒未満の短い録音はデバイスの
 # ウォームアップ時間だけで終わり実音声を拾えないため、チャンクは短くしすぎない。
-SILENCE_THRESHOLD = 0.0015  # USBマイク(音量が小さい)に変更したため下げた。reSpeaker使用時は0.003程度に戻すこと
+SILENCE_THRESHOLD = 0.0045  # 今の環境ノイズフロア(RMS約0.003〜0.008)より上に設定。下げすぎると無音を検知できず字幕が確定されなくなる
 OVERLAP_RMS_RATIO = 2.0
 
 # --- 音量正規化設定 ---
@@ -283,6 +283,11 @@ async def recorder_loop(queue: asyncio.Queue):
 # 最低でもCHUNK_DURATIONより長くする。
 FLUSH_TIMEOUT = config.CHUNK_DURATION + 1.5
 
+# 秒: 無音判定に頼らず、これだけ経ったら強制的にそこまでの内容を字幕として確定する。
+# 環境ノイズがしきい値を超え続けると無音が検知できず、話者も変わらない場合
+# 字幕が永遠に確定・表示されないままになるため、その安全策として設ける。
+MAX_PENDING_DURATION = 8.0
+
 
 async def pipeline_loop():
     global last_rms
@@ -297,9 +302,10 @@ async def pipeline_loop():
     pending_speaker_id = None
     pending_direction = None
     pending_last_seq = None
+    pending_started_at = 0.0
 
     async def flush():
-        nonlocal pending_text, pending_speaker_id, pending_direction, pending_last_seq
+        nonlocal pending_text, pending_speaker_id, pending_direction, pending_last_seq, pending_started_at
         if pending_text:
             print(f"[{pending_speaker_id} | {pending_direction:.0f}°] {pending_text}")
             await broadcast({
@@ -312,6 +318,7 @@ async def pipeline_loop():
         pending_speaker_id = None
         pending_direction = None
         pending_last_seq = None
+        pending_started_at = 0.0
 
     while True:
         try:
@@ -345,11 +352,13 @@ async def pipeline_loop():
             print(f"  [処理時間] 話者判定={time.time()-t_spk0:.2f}s")
             last_rms = rms
 
+            now = time.time()
             is_continuation = (
                 pending_text
                 and pending_speaker_id == speaker_id
                 and pending_last_seq is not None
                 and seq == pending_last_seq + 1
+                and now - pending_started_at < MAX_PENDING_DURATION
             )
             if is_continuation:
                 pending_text += text
@@ -357,6 +366,7 @@ async def pipeline_loop():
                 await flush()
                 pending_text = text
                 pending_speaker_id = speaker_id
+                pending_started_at = now
             pending_direction = direction
             pending_last_seq = seq
 
