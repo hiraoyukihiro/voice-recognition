@@ -32,6 +32,12 @@ WHISPER_CPU_THREADS = 4        # このPCの論理コア数に合わせる
 # プロジェクトフォルダ名「音声認識」配下には置けない。ASCIIのみの場所を指定すること。
 VOSK_MODEL_PATH = r"C:\Users\user\vosk-models\vosk-model-ja-0.22"  # 大型モデル（精度優先、小型モデルは同フォルダのvosk-model-small-ja-0.22）
 
+# --- VAD設定（音声区間検出） ---
+# 音量(SILENCE_THRESHOLD)だけでは車の音などの非音声ノイズと声を区別できないため、
+# Silero VAD（無料・オフライン・軽量）で「人の声かどうか」を判定してから認識にかける。
+ENABLE_VAD = True
+VAD_THRESHOLD = 0.5  # 0〜1。高いほど声と判定されにくくなる（誤検知が多ければ上げる）
+
 # --- 方向検知設定 ---
 DOA_MODE = "mic_array"    # dummy / mic_array / even_g2
 

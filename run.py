@@ -67,7 +67,7 @@ print("=" * 50)
 print("  音声認識システム 起動中...")
 print("=" * 50)
 
-print("\n[1/3] 音声認識モデルをロード中...")
+print("\n[1/4] 音声認識モデルをロード中...")
 if config.WHISPER_ENGINE == "faster_whisper":
     from processing.recognition.faster_whisper_asr import FasterWhisperASR
     asr = FasterWhisperASR(
@@ -85,7 +85,16 @@ else:
     asr = WhisperASR(model_size=config.WHISPER_MODEL, language=config.WHISPER_LANGUAGE)
 asr.load()
 
-print("[2/3] 話者識別モデルをロード中...")
+print("[2/4] VADモデルをロード中...")
+vad = None
+if config.ENABLE_VAD:
+    from processing.vad.silero_vad import SileroVAD
+    vad = SileroVAD(threshold=config.VAD_THRESHOLD, sample_rate=config.SAMPLE_RATE)
+    vad.load()
+else:
+    print("  → VAD無効（config.ENABLE_VAD=Falseのためスキップ）")
+
+print("[3/4] 話者識別モデルをロード中...")
 if config.DIARIZER_MODE == "pyannote":
     import getpass
     hf_token = getpass.getpass(
@@ -106,7 +115,7 @@ else:
         wav = preprocess_wav(audio, source_sr=config.SAMPLE_RATE)
         return encoder.embed_utterance(wav)
 
-print("[3/3] ウォームアップ中（初回のみ時間がかかります）...")
+print("[4/4] ウォームアップ中（初回のみ時間がかかります）...")
 _dummy = np.zeros(config.SAMPLE_RATE * 3, dtype=np.float32)
 asr.transcribe(_dummy, config.SAMPLE_RATE)
 
@@ -351,6 +360,17 @@ async def pipeline_loop():
             audio_amp, gain = await loop.run_in_executor(None, normalize_audio, audio)
             t_norm1 = time.time()
             print(f"\n[音声検出 RMS={rms:.4f} gain={gain:.1f}倍] 認識中...")
+
+            if vad is not None:
+                speech_detected = await loop.run_in_executor(
+                    None, vad.is_speech, audio_amp, config.SAMPLE_RATE
+                )
+                if not speech_detected:
+                    print(f"  [VAD] 声ではないと判定（車の音などのノイズの可能性）。スキップ")
+                    last_rms = rms
+                    if pending_text and pending_last_seq is not None and seq == pending_last_seq + 1:
+                        pending_last_seq = seq
+                    continue
 
             text = await loop.run_in_executor(None, transcribe, audio_amp)
             t_asr1 = time.time()

@@ -7,6 +7,7 @@ scipy>=1.11.0
 faster-whisper>=1.0.0
 openai-whisper>=20231117  # WHISPER_ENGINE="whisper" 用（フォールバック）
 vosk>=0.3.45              # WHISPER_ENGINE="vosk" 用。完全無料・オフライン・軽量。モデルは別途手動ダウンロードが必要
+silero-vad>=6.0           # VAD（音声区間検出）用。完全無料・オフライン。モデルはパッケージに同梱済みでダウンロード不要
 noisereduce>=3.0.0        # マイク感度が低いため増幅前にノイズ除去する
 
 # speaker diarization
