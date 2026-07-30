@@ -29,6 +29,17 @@ class VoskASR(TranscriberBase):
         self._model = Model(self.model_path)
         print("[VoskASR] ロード完了")
 
+    def create_recognizer(self, sample_rate: int = None):
+        """
+        ストリーミング認識用に、状態を持つ認識器を1つ作って返す。
+        （transcribe()は1回ごとに使い捨てだが、ストリーミングでは同じ認識器に
+        音声を流し込み続け、認識器自身に文の区切り（無音）を判定させる）
+        """
+        if self._model is None:
+            raise RuntimeError("load() を先に呼んでください")
+        from vosk import KaldiRecognizer
+        return KaldiRecognizer(self._model, sample_rate or self.sample_rate)
+
     def transcribe(self, audio: np.ndarray, sample_rate: int = 16000) -> str:
         if self._model is None:
             raise RuntimeError("load() を先に呼んでください")

@@ -422,6 +422,127 @@ async def pipeline_loop():
             continue
 
 
+def record_frame() -> np.ndarray:
+    frames = int(config.SAMPLE_RATE * config.FRAME_DURATION)
+    audio = sd.rec(frames, samplerate=config.SAMPLE_RATE, channels=1,
+                   dtype="float32", device=mic_device_index)
+    sd.wait()
+    return audio[:, 0]
+
+
+async def recorder_loop_streaming(queue: asyncio.Queue):
+    """
+    ストリーミング方式用の録音ループ。区切り判定はVosk自身の無音検知に任せるため、
+    従来方式と違い無音チャンクもすべて捨てずにキューへ積み、音声を途切れさせない。
+    """
+    loop = asyncio.get_event_loop()
+    while True:
+        frame = await loop.run_in_executor(None, record_frame)
+        if queue.full():
+            try:
+                queue.get_nowait()
+                print("\n  [警告] 処理が追いつかないため、古いフレームを破棄します")
+            except asyncio.QueueEmpty:
+                pass
+        queue.put_nowait(frame)
+
+
+# 秒: Vosk自身の無音判定（AcceptWaveformがTrueを返すタイミング）は数秒間の完全な沈黙が
+# 必要で、会話の普通の間には遅すぎることを確認した。そのため、部分認識結果(PartialResult)が
+# これだけ変化しなければ「話が一段落した」とみなして先に確定させる、という二段構えにする。
+PARTIAL_STALL_TIMEOUT = 1.5
+
+
+async def pipeline_loop_streaming():
+    """
+    Vosk本来のストリーミングAPIを使う方式。CHUNK_DURATIONで機械的に区切らず、
+    音声を流し込み続けて認識器自身に文脈を持たせたまま認識する。
+    そのため単語の途中で区切られにくい。区切りの確定は次の二段構え:
+      1. Voskが自分で無音を検知した場合はその結果(Result)を使う（一番正確）
+      2. それより前に、部分認識結果(PartialResult)がPARTIAL_STALL_TIMEOUT秒
+         変化しなくなったら、そこで先に区切って確定する（体感速度のため）
+
+    簡略化のため、以下は従来方式と異なる（十分な精度が確認できれば見直す）:
+    - 増幅は発話ごとのピーク基準ではなく固定倍率（MAX_GAIN）。フレームごとに
+      倍率が変わると単語の途中で音量が急変してしまうため。
+    - ノイズ除去(noisereduce)は短いフレーム単位では効果が薄く重いため適用しない。
+    - VADは確定した1発話分の音声に対してまとめて適用する（フレーム単位ではない）。
+    """
+    global last_rms
+    loop = asyncio.get_event_loop()
+    queue: asyncio.Queue = asyncio.Queue(maxsize=20)
+    asyncio.create_task(recorder_loop_streaming(queue))
+    print("\nマイクに向かって話しかけてください（Ctrl+C で停止、ストリーミング方式）\n")
+
+    recognizer = asr.create_recognizer(config.SAMPLE_RATE)
+    utterance_frames: list = []
+    last_partial_text = ""
+    last_partial_change_time = time.time()
+
+    async def finalize(text: str):
+        nonlocal utterance_frames, last_partial_text, last_partial_change_time
+        global last_rms
+        audio_amp = np.concatenate(utterance_frames) if utterance_frames else np.zeros(0, dtype=np.float32)
+        utterance_frames = []
+        last_partial_text = ""
+        last_partial_change_time = time.time()
+
+        text = text.strip()
+        if not text:
+            return
+
+        rms = float(np.sqrt(np.mean(audio_amp ** 2))) if len(audio_amp) else 0.0
+
+        if vad is not None:
+            speech_detected = await loop.run_in_executor(None, vad.is_speech, audio_amp, config.SAMPLE_RATE)
+            if not speech_detected:
+                print(f"  [VAD] 声ではないと判定（ノイズの可能性）。スキップ: 「{text}」")
+                return
+
+        direction = await loop.run_in_executor(None, doa.estimate, audio_amp)
+        speaker_id = await loop.run_in_executor(None, identify_speaker, audio_amp, rms)
+        last_rms = rms
+
+        print(f"[{speaker_id} | {direction:.0f}°] {text}")
+        await broadcast({
+            "type": "subtitle",
+            "speaker_id": speaker_id,
+            "text": text,
+            "direction": direction,
+        })
+
+    while True:
+        try:
+            frame = await queue.get()
+            utterance_frames.append(frame)
+
+            amplified = np.clip(frame * MAX_GAIN, -1.0, 1.0)
+            pcm = (amplified * 32767).astype(np.int16).tobytes()
+            is_final = await loop.run_in_executor(None, recognizer.AcceptWaveform, pcm)
+
+            if is_final:
+                result = json.loads(recognizer.Result())
+                await finalize(result.get("text", ""))
+                continue
+
+            partial = json.loads(recognizer.PartialResult()).get("partial", "").strip()
+            now = time.time()
+            if partial != last_partial_text:
+                last_partial_text = partial
+                last_partial_change_time = now
+            elif partial and (now - last_partial_change_time > PARTIAL_STALL_TIMEOUT):
+                # Voskの無音判定を待たず、ここで先に区切って確定する
+                recognizer.Reset()
+                await finalize(partial)
+
+        except KeyboardInterrupt:
+            raise
+        except Exception:
+            traceback.print_exc()
+            utterance_frames = []
+            continue
+
+
 async def main():
     # HTTPサーバー起動
     start_http_server()
@@ -447,8 +568,15 @@ async def main():
     threading.Timer(1.0, lambda: webbrowser.open(url)).start()
     print(f"[ブラウザ] {url} を自動で開きます\n")
 
+    use_streaming = config.STREAMING_ASR and config.WHISPER_ENGINE == "vosk"
+    if config.STREAMING_ASR and not use_streaming:
+        print("  → STREAMING_ASR=Trueですが、WHISPER_ENGINEがVoskではないため従来方式で動作します")
+
     try:
-        await pipeline_loop()
+        if use_streaming:
+            await pipeline_loop_streaming()
+        else:
+            await pipeline_loop()
     except (KeyboardInterrupt, asyncio.CancelledError):
         print("\n\n停止しました。")
     finally:

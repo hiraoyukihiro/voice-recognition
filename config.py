@@ -18,8 +18,17 @@ DEFAULT_MIC_PROFILE = {"silence_threshold": 0.003, "max_gain": 20.0}  # 未知�
 # 自動判定を無視してそのプロファイルを強制的に使う。「元に戻して」と言われたらNoneに戻せばよい。
 FORCE_MIC_PROFILE = None  # None = 実際に接続されているマイクから自動判定
 SAMPLE_RATE = 16000       # Hz (Whisperは16kHz推奨)
-CHUNK_DURATION = 4.0      # 秒: 一度に処理する音声の長さ（短いと単語の途中で切れて誤認識するため、字幕速度より精度優先で長めに）
+CHUNK_DURATION = 4.0      # 秒: STREAMING_ASR=False（従来方式）の時のみ使用。一度に処理する音声の長さ
 CHANNELS = 1              # モノラル
+
+# --- ストリーミング認識設定（WHISPER_ENGINE="vosk"の時のみ有効） ---
+# True: 音声を流し込み続け、Vosk自身に「文の区切り（無音）」を判定させる新方式。
+#       CHUNK_DURATIONで機械的に区切らないため単語が途中で切れにくく、区切りが
+#       確定した瞬間に字幕を出せるので体感速度も上がる。
+# False: 従来方式（CHUNK_DURATION秒ごとに強制的に区切ってから認識にかける）。
+#        何か問題があれば、ここをFalseにすればいつでも前の方式に戻せる。
+STREAMING_ASR = True
+FRAME_DURATION = 0.3      # 秒: ストリーミング方式でマイクから読み込む単位（短すぎるとデバイスのウォームアップ時間だけで終わるため0.3秒が下限目安）
 
 # --- 音声認識設定 ---
 WHISPER_ENGINE = "vosk"  # faster_whisper / whisper / vosk
