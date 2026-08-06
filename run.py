@@ -482,16 +482,21 @@ async def pipeline_loop_streaming():
     async def finalize(text: str):
         nonlocal utterance_frames, last_partial_text, last_partial_change_time
         global last_rms
-        audio_amp = np.concatenate(utterance_frames) if utterance_frames else np.zeros(0, dtype=np.float32)
+        raw_audio = np.concatenate(utterance_frames) if utterance_frames else np.zeros(0, dtype=np.float32)
         utterance_frames = []
         last_partial_text = ""
         last_partial_change_time = time.time()
+        # VAD・話者判定・方向検知は、Voskの認識に使ったのと同じ増幅後の音声で行う。
+        # 増幅前の生の音声（このマイクは音量が小さい）のままVADにかけると、
+        # 実際は声なのに小さすぎて「声ではない」と誤判定しやすくなるため。
+        audio_amp = np.clip(raw_audio * MAX_GAIN, -1.0, 1.0) if len(raw_audio) else raw_audio
 
         text = text.strip()
         if not text:
             return
 
-        rms = float(np.sqrt(np.mean(audio_amp ** 2))) if len(audio_amp) else 0.0
+        # SILENCE_THRESHOLDは増幅前の生スケールで調整された値のため、rmsも生の音声から計算する
+        rms = float(np.sqrt(np.mean(raw_audio ** 2))) if len(raw_audio) else 0.0
 
         if vad is not None:
             speech_detected = await loop.run_in_executor(None, vad.is_speech, audio_amp, config.SAMPLE_RATE)
