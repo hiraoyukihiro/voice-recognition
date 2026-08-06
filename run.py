@@ -231,7 +231,7 @@ def record_chunk() -> np.ndarray:
     return audio[:, 0]
 
 
-ENABLE_NOISE_REDUCTION = True  # 精度優先のため有効化（処理時間+1〜2秒。CHUNK_DURATIONを伸ばし速度より精度を優先する方針のため許容）
+ENABLE_NOISE_REDUCTION = False  # 増幅前の小さい音に掛けると声の成分まで削って認識が崩れる疑いがあるため無効化（「いい感じ」だった2026-07-27時点の構成に合わせる）
 
 
 def normalize_audio(audio: np.ndarray) -> tuple:
