@@ -3,7 +3,7 @@ import os
 
 # --- 入力設定 ---
 MIC_DEVICE_INDEX = None   # None = 自動検出（MIC_DEVICE_NAMEで検索、失敗時のみシステムデフォルト）
-MIC_DEVICE_NAME = "reSpeaker"  # 自動検出時にデバイス名でマッチさせる部分文字列（USBマイクを外しreSpeakerに戻した）
+MIC_DEVICE_NAME = "USB Microphone"  # 自動検出時にデバイス名でマッチさせる部分文字列（reSpeakerを外しUSBマイクに変更）
 
 # マイクの機種ごとに音量特性が違うため、実際に選ばれたデバイス名にこの部分文字列が
 # 含まれていれば対応する設定を自動適用する（run.py起動時に判定、上から順に最初に一致したものを使う）。
