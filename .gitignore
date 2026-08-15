@@ -12,8 +12,10 @@ error.log
 *.log
 
 # 音声・処理データ(サイズが大きいため除外)
-input/
-output/
+# 注意: 以前は input/ output/ もまるごと除外していたが、中身はソースコードのみ
+# (mic_input.py や output/web/app.js 等)でデータではなく、一度もgit管理されて
+# いなかった。実際に録音データを置く場合は input/recordings/ のように
+# サブディレクトリを切ってそこだけ除外すること。
 test_audio/
 
 # サードパーティ製バイナリ(公式サイトから入手可能)

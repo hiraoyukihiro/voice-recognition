@@ -27,8 +27,12 @@ CHANNELS = 1              # モノラル
 #       確定した瞬間に字幕を出せるので体感速度も上がる。
 # False: 従来方式（CHUNK_DURATION秒ごとに強制的に区切ってから認識にかける）。
 #        何か問題があれば、ここをFalseにすればいつでも前の方式に戻せる。
-STREAMING_ASR = False
-FRAME_DURATION = 0.3      # 秒: ストリーミング方式でマイクから読み込む単位（短すぎるとデバイスのウォームアップ時間だけで終わるため0.3秒が下限目安）
+STREAMING_ASR = True
+FRAME_DURATION = 0.3      # 秒: ストリーミング方式でマイクから読み込む単位。
+# 以前は「毎回マイクを開き直す」実装だったため、短くしすぎるとデバイスのウォームアップ時間
+# だけで終わっていたが、開きっぱなしのInputStreamに変更した現在はその制約はない。
+# 値を小さくすると途中経過(partial)の更新頻度が上がり体感速度が上がる可能性があるが、
+# 未検証のため変更する場合は実際に喋って試すこと。
 
 # --- 音声認識設定 ---
 WHISPER_ENGINE = "vosk"  # faster_whisper / whisper / vosk
@@ -66,8 +70,13 @@ WEB_PORT = 8080
 # --- 話者分離設定 ---
 # pyannoteは精度が高いが数百秒単位でフリーズする既知の不具合があり、
 # フリーズ中はキューが溢れ続けて長時間認識が止まる原因になるためresemblyzerに戻した。
-# pyannote側の実装は残してあるので、値を"pyannote"に戻せばいつでも再度試せる。
-DIARIZER_MODE = "resemblyzer"  # resemblyzer / pyannote
+# その後、先生の引き継ぎ資料（why-we-changed.pdf）の提案で方向(DOA)ベースに変更した。
+# 「誰なのか」ではなく「さっきと違う方向から聞こえた」の区別だけでよく、方向はXVF3800が
+# 教えてくれるため声の特徴量計算そのものが不要になる（軽量・フリーズなし）。
+# 弱点: 同じ方向の2人は区別できない／話者が動くと別人扱いになる／反響の多い部屋では方向がぶれる。
+# 声ベースに戻す場合は"resemblyzer"か"pyannote"に（実装は残してある）。
+DIARIZER_MODE = "direction"  # direction / resemblyzer / pyannote
+DIRECTION_ANGLE_TOLERANCE = 30.0  # 度: これ以内の方向差なら同一話者とみなす（processing/diarization/direction_diarizer.py）
 
 # --- テストファイル ---
 TEST_AUDIO_DIR = os.path.join(os.path.dirname(__file__), "test_audio")

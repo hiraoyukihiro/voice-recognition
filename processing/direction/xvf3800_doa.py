@@ -7,6 +7,8 @@ USB制御転送でデバイスから方向角度を直接取得する（audio引
 """
 import sys
 import struct
+import threading
+import time
 
 import numpy as np
 import usb.core
@@ -19,6 +21,13 @@ PRODUCT_ID = 0x001A
 
 # resid, cmdid, length(bytes), type
 AEC_AZIMUTH_VALUES = (33, 75, 16, "radians")
+
+# 秒: バックグラウンドでUSBから方向を読み直す間隔。
+# 方向はそんなに速く変わらないため、音声処理（0.3秒間隔）ごとに毎回USBへ
+# 同期的に問い合わせるのではなく、別スレッドでこの間隔でだけ読んでキャッシュし、
+# estimate()はキャッシュを返すだけにする（USB制御転送のレイテンシを認識パイプラインの
+# クリティカルパスから外すため）。
+POLL_INTERVAL = 0.1
 
 
 class XVF3800DOA(DirectionEstimatorBase):
@@ -47,6 +56,9 @@ class XVF3800DOA(DirectionEstimatorBase):
                 f"(VID=0x{vendor_id:04X}, PID=0x{product_id:04X})。"
             )
         self._last_angle = 0.0
+        self._lock = threading.Lock()
+        self._stop_event = threading.Event()
+        self._poll_thread = threading.Thread(target=self._poll_loop, daemon=True)
 
     @staticmethod
     def _find_device(vid: int, pid: int):
@@ -65,18 +77,46 @@ class XVF3800DOA(DirectionEstimatorBase):
         num_values = length // 4
         return struct.unpack("<" + "f" * num_values, byte_data[1:length + 1])
 
-    def estimate(self, audio: np.ndarray) -> float:
-        try:
-            azimuths_rad = self._read_azimuths()
-            auto_selected_rad = azimuths_rad[-1]
-            deg = np.degrees(auto_selected_rad)
-            if self.invert:
-                deg = -deg
-            deg = (deg + self.angle_offset) % 360
+    def _read_and_cache(self) -> None:
+        azimuths_rad = self._read_azimuths()
+        auto_selected_rad = azimuths_rad[-1]
+        deg = np.degrees(auto_selected_rad)
+        if self.invert:
+            deg = -deg
+        deg = (deg + self.angle_offset) % 360
+        with self._lock:
             self._last_angle = float(deg)
+
+    def _poll_loop(self) -> None:
+        while not self._stop_event.is_set():
+            try:
+                self._read_and_cache()
+            except Exception:
+                pass
+            self._stop_event.wait(POLL_INTERVAL)
+
+    def start(self) -> None:
+        """バックグラウンドでの方向ポーリングを開始する。呼ばなければ従来通りestimate()呼び出し時に同期読み込みする。"""
+        if not self._poll_thread.is_alive():
+            self._read_and_cache_safe()  # 最初の値が入るまでestimate()が0度を返し続けないように
+            self._poll_thread.start()
+
+    def _read_and_cache_safe(self) -> None:
+        try:
+            self._read_and_cache()
         except Exception:
             pass
+
+    def estimate(self, audio: np.ndarray) -> float:
+        if self._poll_thread.is_alive():
+            with self._lock:
+                return self._last_angle
+        # ポーリング未開始の場合は従来通り同期的に読む（後方互換）
+        self._read_and_cache_safe()
         return self._last_angle
 
     def close(self):
+        self._stop_event.set()
+        if self._poll_thread.is_alive():
+            self._poll_thread.join(timeout=POLL_INTERVAL * 3)
         usb.util.dispose_resources(self.dev)

@@ -19,9 +19,13 @@ import json
 import config
 
 # --- 設定 ---
-# 注記: sd.InputStream（連続録音）はこの環境ではどのバックエンドでも無音になる不具合を確認したため、
-# sd.rec()による固定長チャンク方式を使用する。また0.3秒未満の短い録音はデバイスの
-# ウォームアップ時間だけで終わり実音声を拾えないため、チャンクは短くしすぎない。
+# 注記: 以前は「sd.InputStreamはこの環境で無音になる」としてsd.rec()による
+# 毎回開き直し方式を使っていたが、tools/check_mic_gap.py で検証した結果、
+# 無音になるのはDirectSoundホストAPI経由の場合のみで、WASAPI/MME経由なら
+# 開きっぱなしのInputStreamで問題なく録音できることを確認した（2026-08-15）。
+# 一方sd.rec()の毎回開き直し方式は、この環境で実測9秒分の録音に約1.4〜5.5秒分
+# （16〜61%、負荷状況により変動）の欠落が生じることも確認済みのため、
+# 開きっぱなし方式に切り替える（find_input_deviceのホストAPI優先順位もWASAPI/MME優先に変更済み）。
 OVERLAP_RMS_RATIO = 2.0
 
 # --- 音量正規化設定 ---
@@ -40,6 +44,17 @@ else:
     if mic_device_index is None:
         print(f"  警告: '{config.MIC_DEVICE_NAME}' を含むマイクが見つからないため、システムデフォルトを使用します")
 print(f"  → マイク入力デバイス: {mic_device_index if mic_device_index is not None else 'システムデフォルト'}")
+
+# --- マイクストリーム（開きっぱなし） ---
+# record_chunk()/record_frame() はこのストリームから読み取るだけにし、
+# 呼び出すたびにマイクを開閉しない（開閉のたびに音が録れない時間が生じるため）。
+mic_stream = sd.InputStream(
+    samplerate=config.SAMPLE_RATE,
+    channels=1,
+    dtype="float32",
+    device=mic_device_index,
+)
+mic_stream.start()
 
 # --- マイクごとの自動設定 ---
 # マイクの機種によって音量特性が違うため、実際に選ばれたデバイスの名前から機種を判定し、
@@ -101,7 +116,15 @@ else:
     print("  → VAD無効（config.ENABLE_VAD=Falseのためスキップ）")
 
 print("[3/4] 話者識別モデルをロード中...")
-if config.DIARIZER_MODE == "pyannote":
+direction_diarizer = None
+if config.DIARIZER_MODE == "direction":
+    # 声の特徴量計算（resemblyzer/pyannote）を丸ごとスキップする。
+    # 「誰なのか」ではなく「さっきと違う方向」の区別だけで足りるため
+    # （先生の資料 why-we-changed.pdf の提案）。
+    from processing.diarization.direction_diarizer import DirectionDiarizer
+    direction_diarizer = DirectionDiarizer(angle_tolerance=config.DIRECTION_ANGLE_TOLERANCE)
+    print(f"  → 話者分離: 方向ベース（許容差={config.DIRECTION_ANGLE_TOLERANCE}度、モデルロードなし）")
+elif config.DIARIZER_MODE == "pyannote":
     import getpass
     hf_token = getpass.getpass(
         "HuggingFaceアクセストークンを入力してください（画面には表示されません。ファイルには保存されません）: "
@@ -164,7 +187,10 @@ if config.DOA_MODE == "mic_array":
         from processing.direction.dummy_doa import DummyDOA
         doa = DummyDOA(mode="sweep")
     else:
-        print("  → 方向検知: reSpeaker XVF3800（実機）")
+        # USBへの同期問い合わせを認識パイプラインのクリティカルパスから外すため、
+        # バックグラウンドスレッドで0.1秒ごとに読み直してキャッシュする方式に切り替える
+        doa.start()
+        print("  → 方向検知: reSpeaker XVF3800（実機、バックグラウンドポーリング0.1秒間隔）")
 else:
     from processing.direction.dummy_doa import DummyDOA
     doa = DummyDOA(mode="sweep")
@@ -174,7 +200,10 @@ else:
 clients: set = set()
 
 
-def identify_speaker(audio: np.ndarray, current_rms: float) -> str:
+def identify_speaker(audio: np.ndarray, current_rms: float, direction: float = 0.0) -> str:
+    if config.DIARIZER_MODE == "direction":
+        return direction_diarizer.identify(direction)
+
     global speaker_count, last_speaker_id, last_rms, last_new_speaker_time
     try:
         if last_rms > SILENCE_THRESHOLD and current_rms > last_rms * OVERLAP_RMS_RATIO:
@@ -225,9 +254,9 @@ def transcribe(audio: np.ndarray) -> str:
 
 def record_chunk() -> np.ndarray:
     frames = int(config.SAMPLE_RATE * config.CHUNK_DURATION)
-    audio = sd.rec(frames, samplerate=config.SAMPLE_RATE, channels=1,
-                   dtype="float32", device=mic_device_index)
-    sd.wait()
+    audio, overflowed = mic_stream.read(frames)
+    if overflowed:
+        print("  [警告] マイク入力バッファがオーバーフローしました（処理が録音に追いついていません）")
     return audio[:, 0]
 
 
@@ -247,6 +276,19 @@ def normalize_audio(audio: np.ndarray) -> tuple:
     peak = float(np.max(np.abs(audio))) or 1e-6
     gain = min(TARGET_PEAK / peak, MAX_GAIN)
     return np.clip(audio * gain, -1.0, 1.0), gain
+
+
+def amplify_frame(frame: np.ndarray) -> np.ndarray:
+    """
+    ストリーミング方式（pipeline_loop_streaming）用のフレーム単位増幅。
+    RMSがSILENCE_THRESHOLD未満（＝無音）の場合は増幅しない。
+    無音まで一律MAX_GAIN倍すると、静けさが持ち上がってノイズになり、
+    Voskが「文が終わった」と判定できなくなるため（先生の資料の指摘）。
+    """
+    rms = float(np.sqrt(np.mean(frame ** 2)))
+    if rms < SILENCE_THRESHOLD:
+        return frame
+    return np.clip(frame * MAX_GAIN, -1.0, 1.0)
 
 
 async def ws_handler(websocket, path=None):
@@ -392,7 +434,7 @@ async def pipeline_loop():
             direction = await loop.run_in_executor(None, doa.estimate, audio_amp)
             t_spk0 = time.time()
             speaker_id = await loop.run_in_executor(
-                None, identify_speaker, audio_amp, rms
+                None, identify_speaker, audio_amp, rms, direction
             )
             print(f"  [処理時間] 話者判定={time.time()-t_spk0:.2f}s")
             last_rms = rms
@@ -424,9 +466,9 @@ async def pipeline_loop():
 
 def record_frame() -> np.ndarray:
     frames = int(config.SAMPLE_RATE * config.FRAME_DURATION)
-    audio = sd.rec(frames, samplerate=config.SAMPLE_RATE, channels=1,
-                   dtype="float32", device=mic_device_index)
-    sd.wait()
+    audio, overflowed = mic_stream.read(frames)
+    if overflowed:
+        print("  [警告] マイク入力バッファがオーバーフローしました（処理が録音に追いついていません）")
     return audio[:, 0]
 
 
@@ -505,7 +547,7 @@ async def pipeline_loop_streaming():
                 return
 
         direction = await loop.run_in_executor(None, doa.estimate, audio_amp)
-        speaker_id = await loop.run_in_executor(None, identify_speaker, audio_amp, rms)
+        speaker_id = await loop.run_in_executor(None, identify_speaker, audio_amp, rms, direction)
         last_rms = rms
 
         print(f"[{speaker_id} | {direction:.0f}°] {text}")
@@ -514,6 +556,7 @@ async def pipeline_loop_streaming():
             "speaker_id": speaker_id,
             "text": text,
             "direction": direction,
+            "is_final": True,
         })
 
     while True:
@@ -521,7 +564,7 @@ async def pipeline_loop_streaming():
             frame = await queue.get()
             utterance_frames.append(frame)
 
-            amplified = np.clip(frame * MAX_GAIN, -1.0, 1.0)
+            amplified = amplify_frame(frame)
             pcm = (amplified * 32767).astype(np.int16).tobytes()
             is_final = await loop.run_in_executor(None, recognizer.AcceptWaveform, pcm)
 
@@ -535,6 +578,18 @@ async def pipeline_loop_streaming():
             if partial != last_partial_text:
                 last_partial_text = partial
                 last_partial_change_time = now
+                if partial:
+                    # 全文が読める段階（確定前）でも先に画面へ送る。確定を待つと
+                    # 実際には損をしていない時間（0.87秒 vs 1.50秒、先生の資料より）を待つことになるため。
+                    # 話者判定(embedding)は重いため途中経過では省略し、直近確定した話者をそのまま使う。
+                    direction = doa.estimate(amplified)
+                    await broadcast({
+                        "type": "subtitle",
+                        "speaker_id": last_speaker_id,
+                        "text": partial,
+                        "direction": direction,
+                        "is_final": False,
+                    })
             elif partial and (now - last_partial_change_time > PARTIAL_STALL_TIMEOUT):
                 # Voskの無音判定を待たず、ここで先に区切って確定する
                 recognizer.Reset()
@@ -587,6 +642,8 @@ async def main():
     finally:
         ws_server.close()
         await ws_server.wait_closed()
+        mic_stream.stop()
+        mic_stream.close()
 
 
 if __name__ == "__main__":
