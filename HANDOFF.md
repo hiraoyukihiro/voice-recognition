@@ -45,6 +45,7 @@ python run.py
 | `python tools/analyze_mic_quality.py` | 12秒録って保存し、SNR・スペクトル重心・平坦度を「認識できる基準音」と比較する。**録音が保存されるので、以後は話さず何度でも再解析できる** |
 | `python tools/compare_endpoints.py` | 同じマイクの複数の入り口（WASAPI / WDM-KS × チャンネル別）を録り比べ、どれが正常な音を出しているかVoskで確かめる |
 | `python tools/record_debug.py` | 20秒録音してWAV保存し、その場でVoskにかける |
+| `python tools/replay_wav.py <WAV>` | 録音済みWAVをマイクの代わりに流し込み、字幕が出るか確認する（マイク不要・`run.py`実行中でも安全。`--small`で軽量モデル、`--no-vad`でVAD無効） |
 
 > **認識できない時の切り分け手順（2026-08-27に確立）**
 > 1. Windows音声合成で「確実に正しい日本語音声」を作り、Voskにかける
