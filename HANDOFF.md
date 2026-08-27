@@ -1,171 +1,356 @@
 # 音声認識システム 引き継ぎメモ
-更新日: 2026-08-27
 
-## 重要: 2026-08-27に大幅軽量化（機能を3つに絞った）
-動作が重く実用にならなかったため、以下の3機能だけを残して他は削除した:
-1. **音声認識**（マイク→Vosk→文字化）
-2. **字幕化**（WebSocket→ブラウザ表示）
-3. **方向検知**（reSpeaker XVF3800 DOA、未接続時はダミー）
+更新日: 2026-08-27（実コードを確認して全面書き直し）
 
-削除したもの: 話者分離（direction/resemblyzer/pyannote全実装）、話者色分け表示、
-コンパスUI、テーマ切替、デモモード、VAD、ノイズ除去、HTTP配信サーバー（字幕ページは
-`output/web/index.html` をfile://で直接開く方式に変更。ポート8080は使わなくなった）、
-旧世代パイプライン(run_step3/4.py, server.py)。
-軽量化前の全機能版は git履歴と `C:\Users\user\Desktop\音声認識_安定版\`（別スナップショット）に残っている。
+> **このメモの読み方**
+> 「今どうなっているか」だけを書く。過去の経緯は末尾の `## 参考: これまでの経緯` にまとめてある。
+> 迷ったら **`config.py` と `run.py` が正**。このメモが食い違っていたら、このメモを直すこと。
 
-## プロジェクト場所
-`C:\Users\user\Desktop\音声認識\`
+---
 
-## 起動方法
+## 1. これは何をするものか
+
+片耳が聞こえない人のための支援アプリ。マイクで拾った声を、
+**文字（字幕）** と **どっちから聞こえたか（方向）** にしてブラウザに出す。
+
+登場人物と流れは、これだけ。
+
+```
+マイク → 声かどうか判定する係 → 文字にする係 → 画面に出す係
+(XVF3800)   (Silero VAD)       (Vosk)        (WebSocket→HTML)
+    |
+    +──────→ 方向を知る係 (XVF3800内蔵のDOA) ─────────┘
+```
+
+---
+
+## 2. 起動方法
+
 ```
 cd C:\Users\user\Desktop\音声認識
 python run.py
 ```
-ブラウザが自動で開く。開かない場合は `output/web/index.html` を手動で開く（HTTPサーバーは廃止済み）。
 
-診断ツール:
-```
-python tools/list_mics.py        # 接続中のマイク一覧
-python tools/check_xvf3800.py    # reSpeaker XVF3800のUSB制御・オーディオ入力の検出確認
-python tools/check_vosk.py       # Voskモデルのロード確認＋マイク録音での文字起こしテスト
-python tools/check_mic_gap.py    # マイク録音方式の診断
-```
+ブラウザが自動で開く。開かなければ `output/web/index.html` を直接開く。
+（HTTP配信サーバーは廃止済み。`file://` で直に開く方式）
 
----
+### 診断ツール
 
-## 現在の状態（2026-07-23時点）
-
-### 完了済み
-| 項目 | 内容 |
+| コマンド | 何を見るか |
 |---|---|
-| 3層分離 | 入力(input/)・処理(processing/)・出力(output/)を維持 |
-| 音声認識 | `openai-whisper` → `faster-whisper` に切り替え済み（`small`モデル、`beam_size=1`、`int8`）。2026-07-23、携帯性・無料運用を優先し`vosk`エンジンを追加、デフォルトを`config.WHISPER_ENGINE="vosk"`に変更（完全無料・オフライン・軽量。`vosk-model-small-ja-0.22`使用） |
-| 話者分離 | `resemblyzer`（デフォルト。2026-07-23、pyannoteの激重フリーズ回避のため戻した）と`pyannote.audio`（`pyannote/embedding`）の両対応。`config.DIARIZER_MODE`で切替 |
-| 方向検知 | reSpeaker XVF3800実機のDOA取得に対応（`DOA_MODE="mic_array"`、未接続時はダミーに自動フォールバック） |
-| マイク自動検出 | `input/mic_input.py`の`find_input_device()`で、デバイス名+ホストAPIから自動解決 |
-| 録音/認識の並行処理 | `recorder_loop`と`pipeline_loop`を分離し、認識処理中もマイクを聞き続ける |
-| 長文の自動結合 | チャンク境界をまたいだ発話を連番(seq)で検出し、1つの字幕にまとめて表示 |
-| 幻覚(ハルシネーション)対策 | キーワードベースで「ご視聴ありがとうございました」「お疲れ様でした」等の定型文を除去＋セグメント単位の`no_speech_prob`しきい値フィルタ |
-| 出力UI | デザイン仕様に沿って刷新済み（576×288、字幕上部3行+コンパス右下、ライト/ダーク切替） |
-
-### ハードウェア構成
-- **メインPC**: Intel Core i5-4310M（2014年頃、2コア4スレッド）、メモリ8.5GB
-  - → **Whisperの認識処理そのものが1回あたり約7秒かかるのがこのPCの性能上の限界**。これ以上はモデル/パラメータの調整では大きく縮まらないことを確認済み（medium/tiny/beam_size/CPUスレッド数など一通り試した結果）
-- **マイク**: 2種類を切り替えて使用中
-  1. 汎用USBマイク（感度が低く、増幅が必要。`MIC_DEVICE_NAME="USB Microphone"`）
-  2. **reSpeaker XVF3800 USB 4-Mic Array**（`MIC_DEVICE_NAME="reSpeaker"`）: マイクとしてもDOA(方向検知)実機としても使用可能。ただし過去にWindows側のドライバー・電源供給に起因する接続不安定の問題があった（USBポート直挿し推奨）
-- マイクを差し替えた際は、`config.py`の`MIC_DEVICE_NAME`と、`run.py`冒頭の`SILENCE_THRESHOLD`/`MAX_GAIN`を、使用マイクに合わせて変更すること（下記「切り替え早見表」参照）
-
-### マイク切り替え早見表
-| マイク | `MIC_DEVICE_NAME` | `SILENCE_THRESHOLD`(run.py) | `MAX_GAIN`(run.py) |
-|---|---|---|---|
-| 汎用USBマイク（感度低い） | `"USB Microphone"` | `0.0001` | `100.0` |
-| reSpeaker XVF3800 | `"reSpeaker"` | `0.003` | `20.0` |
+| `python tools/list_mics.py` | 今つながっているマイクの一覧 |
+| `python tools/check_xvf3800.py` | reSpeakerのUSB制御と音声入力が生きているか |
+| `python tools/check_vosk.py` | Voskモデルが読めるか＋実際に文字起こしできるか |
+| `python tools/check_mic_gap.py` | 録音の取りこぼしがないか |
+| `python tools/analyze_mic_quality.py` | マイクの音質・音量の傾向 |
+| `python tools/compare_endpoints.py` | 文の区切り方の比較 |
+| `python tools/record_debug.py` | デバッグ用の録音 |
 
 ---
 
-## 技術構成
+## 3. 今の構成（★ここが一番大事）
 
-### 使用モデル・ライブラリ
-| 用途 | ライブラリ | 設定 |
+### 3-1. 実際に動いているもの
+
+| 係 | 使っているもの | 決めている場所 |
 |---|---|---|
-| 音声認識 | faster-whisper | モデル: small、言語: ja、beam_size=1、int8、cpu_threads=4 |
-| 話者分離 | resemblyzer or pyannote.audio(pyannote/embedding) | `config.DIARIZER_MODE`で切替。しきい値は方式ごとに別設定 |
-| 方向検知 | reSpeaker XVF3800実機 or ダミー | `config.DOA_MODE`で切替 |
-| ノイズ除去 | noisereduce | `run.py`の`ENABLE_NOISE_REDUCTION`で有効/無効切替（現在False。有効にすると+1〜2秒） |
-| 通信 | websockets | ポート: 8765 |
-| Web表示 | HTML/CSS/JS | ポート: 8080（`tools/serve_web.py`でキャッシュ無効化配信） |
+| 文字にする係 | **Vosk 大型日本語モデル**（`vosk-model-ja-0.22`、約1.4GB） | `config.py` の `WHISPER_ENGINE = "vosk"` |
+| 動かし方 | **流しっぱなし方式**（ストリーミング） | `config.py` の `STREAMING_ASR = True` |
+| 声かどうか判定 | **Silero VAD**（しきい値 0.15） | `config.py` の `ENABLE_VAD = True` |
+| 方向を知る係 | **reSpeaker XVF3800 実機のDOA** | `config.py` の `XVF3800_*` |
+| 画面に出す係 | WebSocket（ポート 8765）→ ブラウザ | `config.py` の `WEBSOCKET_PORT` |
 
-### 話者分離のしきい値（run.py内、DIARIZER_MODEごとに自動切替）
+### 3-2. Whisperは使っていない（重要）
+
+**現在 Whisper は一切動いていない。** `run.py` の分岐で読み込まれない。
+
 ```python
-# resemblyzer
-SIMILARITY_THRESHOLD = 0.75   # これ以上で同一話者
-NEW_SPEAKER_THRESHOLD = 0.35  # これ未満で新規話者
-
-# pyannote（resemblyzerよりスコアが全体的に低く出る傾向。調整途上）
-SIMILARITY_THRESHOLD = 0.5
-NEW_SPEAKER_THRESHOLD = 0.15
+if config.WHISPER_ENGINE == "faster_whisper":   # 当てはまらない
+    from processing.recognition.faster_whisper_asr import FasterWhisperASR
+elif config.WHISPER_ENGINE == "vosk":            # ★ここに入る
+    from processing.recognition.vosk_asr import VoskASR
+else:
+    from processing.recognition.whisper_asr import WhisperASR
 ```
-`NEW_SPEAKER_COOLDOWN = 8.0`秒（新規話者登録の連発防止）、`EMBEDDING_UPDATE_RATE = 0.3`（高確信度一致時に声の特徴を少しずつ更新）。
 
-### 主要パイプライン設定（run.py / config.py）
-```python
-CHUNK_DURATION = 1.5       # 秒（reSpeaker接続時に短縮を検証中。短すぎると認識漏れ増加に注意）
-FLUSH_TIMEOUT = CHUNK_DURATION + 1.5  # これだけ次のチャンクが来なければ文を確定
-queue maxsize = 8          # 処理待ち音声チャンクの上限。溢れたら最新優先で古いものを破棄
-```
+`import`（＝道具を持ってくる命令）が `if` の中にあるため、条件に合わない側は
+メモリにも乗らない。`faster_whisper_asr.py` と `whisper_asr.py` は
+**いつでも戻せるように残してあるだけ**。
+
+### 3-3. タイミングの設定値
+
+| 値 | いくつ | 意味 | 場所 |
+|---|---|---|---|
+| `FRAME_DURATION` | 0.3秒 | マイクから読み取る単位 | `config.py` |
+| `PARTIAL_STALL_TIMEOUT` | 0.8秒 | 途中結果がこれだけ変わらなければ文を確定する | `run.py:363` |
+| `VAD_CHECK_SECONDS` | 1.5秒 | 直近何秒分を見て「声か」を判定するか | `config.py` |
+| `VAD_CHECK_INTERVAL` | 3フレーム | 何フレームごとに声判定をやり直すか | `config.py` |
+| DOAポーリング | 0.1秒 | 方向を裏で読み直す間隔 | `run.py` |
+
+⚠️ **`CHUNK_DURATION`（= 4.0）は、今の流しっぱなし方式では1度も使われない。**
+`FLUSH_TIMEOUT` 経由で `pipeline_loop()`（旧方式）だけが使う。ここを変えても何も起きない。
+
+### 3-4. 文の区切り方（字幕が出るまで）
+
+Vosk自身の無音判定は、数秒の完全な沈黙を要求するため会話には遅すぎる。そこで二段構え。
+
+1. 途中結果（PartialResult）が出たら、**確定を待たずに先に画面へ送る**（`is_final: false`）
+2. 途中結果が **0.8秒** 変わらなければ、そこで区切って確定（`is_final: true`）
+3. Vosk自身が無音を検知した場合は、そちらの結果を優先（一番正確）
 
 ---
 
-## 既知の問題・未解決事項
+## 4. ハードウェア
 
-### 1. Whisper認識速度がこのPCの性能限界（根本解決は困難）
-- 1発話(1.5〜3秒)あたり約7秒かかる。continuous に話し続けると処理待ちキューが溜まり、
-  古い発話が破棄されるか、字幕が遅延して蓄積する（`queue maxsize=8`で多少緩和）
-- 試して効果がなかった/悪化したもの: `tiny`モデル（幻覚で逆に遅くなり精度も悪化）、チャンク1.2秒（認識漏れ増加）
-- 抜本解決には次のいずれかが必要（ユーザーは一旦ローカル処理継続を選択）:
-  - クラウド音声認識API（Google/Azure等）への切り替え
-  - より高性能なPC/GPUの用意
+### メインPC（実測値、2026-08-27）
 
-### 2. pyannote.audio導入に伴う不安定さ（2026-07-23時点でresemblyzerに戻して回避中）
-- **対応**: 「原因不明の激重フリーズ」がキュー溢れ・長時間無認識の最有力原因だったため、`config.DIARIZER_MODE`を`"resemblyzer"`に戻した。pyannote側の実装は残してあり、いつでも切り戻せる
-- 以下は切り戻す場合の既知の注意点（調査中のまま）
-- **HuggingFace関連の既知の落とし穴**（解決済みだが再発しうる）:
-  - `huggingface_hub`が1.x系だと`pyannote.audio 4.0.7`のgatedモデル取得が`401 GatedRepoError`で失敗する
-    → `pip install "huggingface_hub<1.0"`で固定（`requirements.txt`に記載済み）
-  - `omegaconf`が自動インストールされないため`pip install omegaconf`が別途必要（`requirements.txt`に記載済み）
-  - `pyannote/embedding`は`pyannote/speaker-diarization-3.1`等とは**別に**HuggingFace上でゲート同意が必要
-- **しきい値が未調整**: pyannote版のSIMILARITY_THRESHOLD/NEW_SPEAKER_THRESHOLDは暫定値。実データでの再調整が必要
-- **原因不明の激重フリーズ**: 通常7秒程度の認識処理が、稀に132秒・517秒など異常に長くかかることがある。
-  熱暴走ではないことは確認済み。メモリは8.5GB中6GB使用と余裕は少なめ（pyannote.audio(PyTorch)導入で使用量増加）。
-  Windows Defenderのリアルタイムスキャン等、他の要因も疑われるが未特定
-- ユーザーは「pyannote.audioの安定化を続ける」か「resemblyzerに戻す」かを保留中
+| 部品 | 中身 |
+|---|---|
+| CPU | Intel Core i5-4310M（2014年、2コア4スレッド、2.7GHz） |
+| メモリ | 7.9 GB |
+| GPU | Intel HD 4600 — **CUDA非対応。AI計算には使えない** |
+| PyTorch | `2.12.1+cpu`（CPU版。GPUは使えない） |
+| ctranslate2 | int8 / int16 / float32 のみ対応（float16・bfloat16は不可） |
 
-### 3. reSpeaker XVF3800の接続不安定性
-- 過去にWindows側でドライバーが一切当たらない（Code 28）、Zadigで解決したがマイクとして認識されなくなる、
-  という問題があった。現状はマイク+DOA制御の両方が動く状態まで来ているが、**USB切断・再接続を繰り返すと
-  再発する可能性がある**ため、`tools/check_xvf3800.py`で毎回接続確認してから使うこと
+### マイク
 
-### 4. Voskモデルの配置場所（重要・Windows固有の地雷）
-- Vosk(内部でKaldiのC++実装)はWindowsで非ASCIIパスのモデル読み込みに失敗する。
-  このプロジェクトのフォルダ名「音声認識」自体が非ASCIIのため、**プロジェクト内(`models/`等)にはVoskモデルを置けない**
-- そのため`config.VOSK_MODEL_PATH`は `C:\Users\user\vosk-models\vosk-model-small-ja-0.22` というASCIIのみの固定パスを直接指定している。他のPCに移行する際もこの制約を忘れないこと
-- 精度が足りない場合は同じ場所に`vosk-model-ja-0.22`(1GB、高精度版)を追加ダウンロードし、`VOSK_MODEL_PATH`を切り替えれば良い
+| マイク | `MIC_DEVICE_NAME` | 無音しきい値 | 最大増幅 |
+|---|---|---|---|
+| reSpeaker XVF3800 4-Mic Array | `"reSpeaker"` | 0.0003 | 20.0 |
+| 汎用USBマイク（感度低い） | `"USB Microphone"` | 0.0045 | 50.0 |
+| 未知のマイク | （自動判定） | 0.003 | 20.0 |
 
-### 5. Even G2対応（SDK連携は未着手）
-- 出力UI（`output/web/`）はデザイン仕様通り実装済み、PCブラウザで動作確認済み
-- `@evenrealities/even_hub_sdk`の組み込みは未着手（このPCにNode.js未インストールのため）
-- Python側(`run.py`の`broadcast()`)は新WebSocket形式（`speaker_id`数値、`direction`-180〜180、`is_active`）に
-  まだ対応していない。現状は旧形式（文字列speaker_id、`type:"subtitle"`）のまま送信しており、
-  フロントエンドの新デザインとは後方互換のみで正式対応していない
+この表は `config.py` の `MIC_PROFILES` に入っており、**接続されたマイク名から自動で選ばれる**。
+昔のように `run.py` を書き換える必要はない。強制したいときは `FORCE_MIC_PROFILE` を使う。
 
 ---
 
-## フォルダ構成
+## 5. 性能の実測値（2026-08-27、このPCで計測）
+
+RTF（＝リアルタイムファクター）は、音声の長さに対して何倍の時間がかかるかを表す。
+**1.0未満なら間に合っている。**
+
+### 5-1. エンジン別（30秒の音声）
+
+| エンジン | 処理時間 | RTF | 判定 |
+|---|---:|---:|---|
+| **Vosk 大型（現用）** | 7.0秒 | **0.23** | ✅ 十分間に合う |
+| faster-whisper small | 8.1秒 | 0.27 | ✅ ただし下記5-2の落とし穴あり |
+| Vosk 小型 | 19.3秒 | 0.64 | △ 測定条件が悪く要再測定 |
+| faster-whisper tiny | 25.9秒 | 0.86 | ❌ 幻覚が出て逆に遅い |
+
+> ⚠️ Vosk小型がVosk大型より遅いという結果は不自然。テスト音声が `mic_test.wav`（5秒）を
+> 6回つなげた不自然な音だったせいと思われる。**実際の会話30秒での再測定が必要。**
+
+### 5-2. Whisperの落とし穴（将来Whisperに戻すとき必読）
+
+**Whisperは、渡された音を必ず内部で30秒に引き伸ばして計算する。**
+そのため、短い音を渡しても処理時間は減らない。実測はこうなった。
+
+| 渡した音声の長さ | 処理時間 | 音声1秒あたりの重さ |
+|---:|---:|---:|
+| 1.0秒 | 7.25秒 | 7.25倍 |
+| 1.5秒 | 7.07秒 | 4.71倍 |
+| 3.0秒 | 6.91秒 | 2.30倍 |
+| 5.0秒 | 7.33秒 | 1.47倍 |
+| 10秒 | 7.92秒 | 0.79倍 |
+| 20秒 | 7.01秒 | 0.35倍 |
+| 30秒 | 7.49秒 | **0.25倍** |
+
+**結論: 音声の長さに関係なく、常に約7秒かかる。**
+
+昔このメモに書いてあった「1発話7秒はPCの性能限界。根本解決は困難」は **誤り** だった。
+原因は性能ではなく、**1.5秒ずつ刻んでWhisperに渡していたこと**。
+Whisperに渡すなら **1発話まるごと（10〜30秒）** にしないと、計算力の大半を捨てることになる。
+
+（正式な言い方: 入力が30秒固定長のメルスペクトログラムにパディングされるため）
+
+### 5-3. tinyがsmallより遅い理由
+
+tinyは幻覚（＝聞こえていない言葉を勝手に作り出すこと）を起こしやすい。
+Whisperは1文字ずつ順に作るので、出力が長くなるほど時間もかかる。**tinyを選んではいけない。**
+
+（正式な言い方: ハルシネーションによる自己回帰デコードの長大化）
+
+---
+
+## 6. フォルダ構成（2026-08-27時点の実物）
+
 ```
 音声認識/
-├── run.py                          ★ メイン起動スクリプト
-├── config.py                       設定ファイル
+├── run.py                          ★ これ1つで全部動く
+├── config.py                       ★ 設定はここに集約
+├── CLAUDE.md                       説明の書き方ルール
+├── HANDOFF.md                      このファイル
+├── requirements.txt                ⚠️ 内容が古い（7-3参照）
 ├── input/
-│   └── mic_input.py                マイク抽象化・自動デバイス検出
+│   ├── base.py                     入力の共通の型（現在未使用）
+│   └── mic_input.py                マイク自動検出
 ├── processing/
 │   ├── direction/
-│   │   ├── dummy_doa.py            ダミー方向検知
-│   │   └── xvf3800_doa.py          reSpeaker実機DOA
+│   │   ├── base.py
+│   │   └── xvf3800_doa.py          ★ reSpeaker実機のDOA
 │   ├── recognition/
-│   │   ├── whisper_asr.py          openai-whisper実装（フォールバック）
-│   │   ├── faster_whisper_asr.py   faster-whisper実装
-│   │   └── vosk_asr.py             Vosk実装（メイン。無料・オフライン・軽量）
-│   └── diarization/
-│       ├── resemblyzer_diarizer.py resemblyzer実装
-│       └── pyannote_diarizer.py    pyannote.audio(embedding)実装
+│   │   ├── base.py
+│   │   ├── vosk_asr.py             ★ 現在使用中
+│   │   ├── faster_whisper_asr.py   （残してあるだけ・未使用）
+│   │   └── whisper_asr.py          （残してあるだけ・未使用）
+│   └── vad/
+│       └── silero_vad.py           ★ 声かどうかの判定
 ├── output/
-│   ├── browser_display.py          WebSocket送信
-│   └── web/                        ブラウザUI（HTML/CSS/JS）
-└── tools/
-    ├── list_mics.py                 マイク一覧
-    ├── check_xvf3800.py             reSpeaker接続診断
-    ├── check_hf_token.py            HuggingFaceトークン診断
-    ├── check_vosk.py                Voskモデルロード・文字起こし確認
-    └── serve_web.py                 output/web/ 単体プレビュー用サーバー
+│   ├── base.py                     （未使用）
+│   ├── browser_display.py          （未使用。run.py が自前でWebSocketを持っている）
+│   └── web/
+│       ├── index.html              ★ 字幕画面
+│       ├── style.css
+│       └── app.js
+├── test_audio/
+│   └── mic_test.wav                5秒。⚠️ 性能測定には不十分
+└── tools/                          診断ツール群（上記2を参照）
 ```
+
+### 削除済み（gitの履歴と `音声認識_安定版\` に残っている）
+
+話者分離すべて（resemblyzer / pyannote / direction_diarizer）、話者色分け表示、
+コンパスUI、テーマ切替、デモモード、ノイズ除去、ダミー方向検知、ダミー入力、
+ファイル入力、HTTP配信サーバー、旧パイプライン（`run_step3.py` / `run_step4.py` / `server.py`）。
+
+---
+
+## 7. 既知の問題・未解決事項
+
+### 7-1. 方角があべこべに検出される（未解決）
+
+**疑うべき順番:**
+
+1. **チャンネルの並び順のズレ** ← まずここを疑う
+   XVF3800はUSBから複数チャンネルを出す。「0番が基板上のどのマイクか」を
+   取り違えると、角度が鏡に映したように反転する。
+2. **Windowsのドライバー由来**
+   → Linux（ラズパイ）に移すと直る可能性がある
+3. マイク1本の故障
+
+暫定の逃げ道として `config.py` に `XVF3800_ANGLE_OFFSET`（ズレの補正）と
+`XVF3800_INVERT`（回転方向の反転）がある。`tools/check_xvf3800.py` で見ながら調整する。
+
+### 7-2. reSpeaker XVF3800 の接続が不安定
+
+過去にドライバーが当たらない（Code 28）、Zadigで解決したがマイクとして
+認識されなくなる、という問題があった。**USBポートに直挿しすること。**
+使う前に毎回 `tools/check_xvf3800.py` で確認するのが安全。
+
+見つからない場合は、5回リトライしたあと **方向検知なし（常に0度）で起動** する。
+字幕機能はそのまま使えるので、止まりはしない。
+
+### 7-3. requirements.txt が現状と合っていない
+
+削除済みの機能のライブラリが残っている。**要整理。**
+
+| 記載あり | 実際 |
+|---|---|
+| `resemblyzer` | 削除済み。不要 |
+| `pyannote.audio` | 削除済み。不要 |
+| `huggingface_hub<1.0` | pyannote用。不要 |
+| `omegaconf` | pyannote用。不要 |
+| `noisereduce` | 削除済み。不要 |
+| `faster-whisper` / `openai-whisper` | 未使用だが、戻せるよう残す価値はある |
+| `silero-vad` | ✅ 使用中 |
+| `vosk` | ✅ 使用中 |
+
+### 7-4. Voskモデルは非ASCIIパスに置けない（Windows固有の地雷）
+
+Voskの中身（Kaldi）はWindowsで日本語を含むパスからモデルを読めない。
+このフォルダ名「音声認識」自体が非ASCIIなので、**プロジェクト内には置けない。**
+
+そのため `config.py` の `VOSK_MODEL_PATH` は下記を直接指している。
+
+```
+C:\Users\user\vosk-models\vosk-model-ja-0.22        ← 現用（大型・高精度・約1.4GB）
+C:\Users\user\vosk-models\vosk-model-small-ja-0.22  ← 軽量版（同じ場所にある・約48MB）
+```
+
+他のPCに移すときも、この制約を忘れないこと。
+
+### 7-5. Even G2 対応は未着手
+
+- 出力UI（`output/web/`）はPCブラウザで動作確認済み
+- `@evenrealities/even_hub_sdk` の組み込みは未着手（Node.js未導入）
+- `run.py` の `broadcast()` が送る形式は旧仕様のまま
+  （`speaker_id` が文字列、`type:"subtitle"`）。デザイン仕様の新形式
+  （`speaker_id` 数値、`direction` -180〜180、`is_active`）には未対応
+
+---
+
+## 8. ラズパイ4への移植メモ（検討段階）
+
+### 結論
+
+**今の構成（Voskの流しっぱなし方式）は、ラズパイ4でほぼそのまま動く見込み。**
+Whisperを載せる検討は不要。ラズパイ4では実用にならないことが公開ベンチマークで判明している。
+
+| 部分 | ラズパイ4で |
+|---|---|
+| Vosk ストリーミング | ✅ 動く。公式もラズパイを推奨環境に挙げている |
+| XVF3800 の方向検知 | ✅ 動く。**もともとラズパイ向けに設計された基板** |
+| WebSocket + HTML | ✅ 動く |
+| Silero VAD | ✅ 軽いので問題なし |
+| **Voskのモデルの大きさ** | ⚠️ **ここだけ要検討** |
+
+参考（公開ベンチマーク）:
+
+| エンジン | ラズパイ4での結果 |
+|---|---|
+| Whisper tiny | ぎりぎりリアルタイム。ただし幻覚が多い |
+| Whisper base | リアルタイムの半分の速さ |
+| Whisper small | 実用にならない |
+| Vosk 小型モデル | リアルタイムで動く |
+
+### 検討事項
+
+- ラズパイ4のCPU（Cortex-A72 1.5GHz）は、このPCの **1/2〜1/3** の速さ
+- 現用の大型モデルは約1.4GB。**2GB版のラズパイには載らない**
+- 小型モデル（48MB）なら確実に載るが、精度が落ちる
+- **ラズパイ4のメモリ容量（2GB / 4GB / 8GB）の確認が必要**
+
+### やるべきこと
+
+`config.py` に切り替えスイッチを足し、1行でPC版とラズパイ版を切り替えられるようにする。
+
+```python
+PROFILE = "pc"   # "pc" か "rpi4"
+```
+
+3層アーキテクチャ（入力・処理・出力の分離）は壊さないこと。
+
+---
+
+## 9. 次にやること（優先順）
+
+1. **実際の会話を30秒録音して `test_audio/` に置く**
+   これがないと、モデル比較もラズパイ移植の判断もできない
+2. `requirements.txt` を整理する（7-3）
+3. 「方角があべこべ」を、チャンネルの並び順から調べる（7-1）
+4. ラズパイ4のメモリ容量を確認し、`PROFILE` スイッチを実装する（8）
+5. WebSocketの送信形式を新デザイン仕様に合わせる（7-5）
+6. Even G2 購入 → Even Hub SDK 導入
+
+---
+
+## 参考: これまでの経緯
+
+| 日付 | 出来事 |
+|---|---|
+| 〜2026-07 | openai-whisper → faster-whisper に変更（small / int8 / beam_size=1） |
+| 2026-07-23 | 無料・オフライン運用を優先し **Vosk** を追加。既定エンジンをVoskに変更 |
+| 2026-07-23 | pyannote が原因不明のフリーズを起こすため resemblyzer に戻す |
+| 2026-08-27 17:37 | **大幅軽量化。** 話者分離・VAD・ダミー実装・旧パイプラインを削除 |
+| 2026-08-27 以降 | 雑音に文字を当ててしまう問題のため **VADのみ復活**（しきい値 0.5→0.15） |
+| 2026-08-27 | Voskの探索範囲を狭めて認識が2.7倍高速化（実時間の74%→27%） |
+| 2026-08-27 | 性能を実測し、「7秒問題」の原因がWhisperの30秒パディングだと判明（5-2） |
+
+### 過去の誤った結論（繰り返さないための記録）
+
+- ❌ 「1発話7秒はPCの性能限界。クラウドAPIか高性能PCが必要」
+  → **誤り。** 1.5秒刻みでWhisperに渡していたことが原因（5-2参照）
+- ❌ 「tinyモデルなら軽いから速いはず」
+  → **誤り。** 幻覚で出力が伸び、smallより3倍遅い（5-3参照）
