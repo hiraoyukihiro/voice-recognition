@@ -14,6 +14,7 @@ import numpy as np
 import sounddevice as sd
 import websockets
 import json
+import collections
 
 import config
 
@@ -160,6 +161,45 @@ else:
 def estimate_direction(audio: np.ndarray) -> float:
     return doa.estimate(audio) if doa is not None else 0.0
 
+# --- 音イベント検知（HoloSound論文2.2節の再現） ---
+# 「今どんな音が鳴ったか」（ノック・火災報知器・電話など19種）を字幕とは別に判定する係。
+# 直近の生音をここに貯めておき、SOUND_EVENT_HOP秒ごとに末尾1秒ぶんを判定にかける
+# （論文と同じスライディングウィンドウ方式）。
+_frames_per_window = max(1, int(np.ceil(config.SOUND_EVENT_WINDOW / config.FRAME_DURATION)))
+recent_frames: collections.deque = collections.deque(maxlen=_frames_per_window + 1)
+
+sound_detector = None
+if config.ENABLE_SOUND_EVENT:
+    try:
+        from processing.sound_event.panns_tagger import PANNsSoundEventDetector
+        print("音イベント検知モデル(PANNs CNN14)を読み込み中... 初回は数十秒かかります")
+        sound_detector = PANNsSoundEventDetector(
+            checkpoint_path=config.PANNS_CHECKPOINT,
+            min_confidence=config.SOUND_EVENT_MIN_CONFIDENCE,
+            min_db=config.SOUND_EVENT_MIN_DB,
+            db_offset=config.SOUND_EVENT_DB_OFFSET,
+            exclude_speech=config.SOUND_EVENT_EXCLUDE_SPEECH,
+        )
+        if config.SOUND_EVENT_DB_OFFSET is None:
+            print("  → 音イベント検知: 有効（音量による足切りは未校正のため無効。"
+                  "python tools/calibrate_db.py で校正できます）")
+        else:
+            print(f"  → 音イベント検知: 有効（{config.SOUND_EVENT_MIN_DB}dB / "
+                  f"自信度{config.SOUND_EVENT_MIN_CONFIDENCE:.0%} 未満は無視）")
+    except Exception as e:
+        print(f"  → 音イベント検知を読み込めませんでした（字幕と方向は通常どおり動きます）: {e}")
+        sound_detector = None
+
+
+def window_audio() -> np.ndarray:
+    """直近の音から、判定にかける1秒ぶんを取り出す。足りなければ空を返す。"""
+    if not recent_frames:
+        return np.zeros(0, dtype=np.float32)
+    need = int(config.SAMPLE_RATE * config.SOUND_EVENT_WINDOW)
+    buf = np.concatenate(list(recent_frames))
+    return buf[-need:] if len(buf) >= need else buf
+
+
 # --- WebSocketクライアント管理 ---
 clients: set = set()
 
@@ -205,6 +245,20 @@ def amplify_frame(frame: np.ndarray) -> np.ndarray:
 async def ws_handler(websocket, path=None):
     clients.add(websocket)
     print(f"[ブラウザ接続] 現在{len(clients)}台")
+    # 表示の決まり事はPython側が正とし、接続時に画面へ配る
+    # （JS側にも同じ数字を書くと、片方だけ直して食い違う事故が起きるため）
+    try:
+        await websocket.send(json.dumps({
+            "type": "config",
+            "sectors": config.DIRECTION_SECTORS,
+            "max_sources": config.MAX_SOUND_SOURCES,
+            "sound_history": config.SOUND_EVENT_HISTORY,
+            "subtitle_lines": config.SUBTITLE_LINES,
+            "arc_lifetime": config.SOURCE_ARC_LIFETIME,
+            "subtitle_view": config.SUBTITLE_VIEW,
+        }, ensure_ascii=False))
+    except Exception:
+        pass
     try:
         await websocket.wait_closed()
     finally:
@@ -231,6 +285,7 @@ async def recorder_loop(queue: asyncio.Queue):
     seq = 0
     while True:
         audio = await loop.run_in_executor(None, record_chunk)
+        recent_frames.append(audio)
         rms = float(np.sqrt(np.mean(audio ** 2)))
         seq += 1
         if rms < SILENCE_THRESHOLD:
@@ -346,6 +401,8 @@ async def recorder_loop_streaming(queue: asyncio.Queue):
     loop = asyncio.get_event_loop()
     while True:
         frame = await loop.run_in_executor(None, record_frame)
+        # 音イベント検知は増幅前の生の音を使う（音量の判定を狂わせないため）
+        recent_frames.append(frame)
         if queue.full():
             try:
                 queue.get_nowait()
@@ -481,6 +538,67 @@ async def pipeline_loop_streaming():
             continue
 
 
+async def sound_event_loop():
+    """
+    論文2.2節の再現。SOUND_EVENT_HOP秒ごとに直近1秒の音を判定し、
+    19種のどれかに当てはまれば画面へ送る。
+    重い処理なので必ず別スレッド(executor)で回し、字幕の流れを止めない。
+    同じ種類の音は SOUND_EVENT_COOLDOWN 秒のあいだ再表示しない（連発防止）。
+    """
+    loop = asyncio.get_event_loop()
+    last_sent: dict = {}
+    while True:
+        await asyncio.sleep(config.SOUND_EVENT_HOP)
+        audio = window_audio()
+        if len(audio) < config.SAMPLE_RATE * config.SOUND_EVENT_WINDOW * 0.5:
+            continue
+        try:
+            events = await loop.run_in_executor(
+                None, sound_detector.detect, audio, config.SAMPLE_RATE
+            )
+        except Exception:
+            traceback.print_exc()
+            continue
+        if not events:
+            continue
+
+        now = time.time()
+        top = events[0]
+        if now - last_sent.get(top.key, 0.0) < config.SOUND_EVENT_COOLDOWN:
+            continue
+        last_sent[top.key] = now
+
+        direction = estimate_direction(audio)
+        payload = top.to_dict()
+        payload.update({"type": "sound_event", "direction": direction})
+        print(f"  [音] {top.icon} {top.name} ({top.confidence:.0%}) {direction:.0f}°")
+        await broadcast(payload)
+
+
+async def direction_loop():
+    """
+    方向を一定間隔で送り続ける係。字幕が出た瞬間だけでなく常に送ることで、
+    画面の円弧（論文Figure 1の中央部）をなめらかに動かせる。
+    音が鳴っているかどうか(active)も一緒に送り、無音の時は円弧を出さない。
+    """
+    while True:
+        await asyncio.sleep(config.DIRECTION_BROADCAST_INTERVAL)
+        if not clients:
+            continue
+        audio = window_audio()
+        if len(audio) == 0:
+            continue
+        rms = float(np.sqrt(np.mean(audio ** 2)))
+        active = rms >= SILENCE_THRESHOLD
+        if not active:
+            continue
+        await broadcast({
+            "type": "direction",
+            "direction": estimate_direction(audio),
+            "level": rms,
+        })
+
+
 async def main():
     # WebSocketサーバー起動
     for attempt in range(10):
@@ -507,6 +625,11 @@ async def main():
     if config.STREAMING_ASR and not use_streaming:
         print("  → STREAMING_ASR=Trueですが、WHISPER_ENGINEがVoskではないため従来方式で動作します")
 
+    background = []
+    if sound_detector is not None:
+        background.append(asyncio.create_task(sound_event_loop()))
+    background.append(asyncio.create_task(direction_loop()))
+
     try:
         if use_streaming:
             await pipeline_loop_streaming()
@@ -515,6 +638,8 @@ async def main():
     except (KeyboardInterrupt, asyncio.CancelledError):
         print("\n\n停止しました。")
     finally:
+        for task in background:
+            task.cancel()
         ws_server.close()
         await ws_server.wait_closed()
         mic_stream.stop()

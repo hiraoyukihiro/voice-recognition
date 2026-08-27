@@ -1,4 +1,10 @@
-/* 最小構成: 黒背景に字幕（方向矢印つき）を上部固定で表示するだけ */
+/*
+  HoloSound論文Figure 1の画面構成を再現する。
+    上（または方向つき配置）… 字幕
+    中央 … 12分割した方向の円弧（上から見た図、最大4音源）
+    左下 … 直近3件の音の種類
+  背景は黒。将来ARグラスへ移す時、黒＝透明として扱える形にしておくため。
+*/
 * {
   margin: 0;
   padding: 0;
@@ -18,7 +24,7 @@ body {
   height: 100vh;
 }
 
-/* 字幕: 画面上部固定・直近3行 */
+/* ---------- ① 字幕 ---------- */
 #subtitle-area {
   position: absolute;
   top: 16px;
@@ -27,6 +33,16 @@ body {
   display: flex;
   flex-direction: column;
   gap: 8px;
+  transition: transform 0.35s ease;
+}
+
+/* windowsビュー: 話者の方向に合わせて字幕のかたまりごと動かす。
+   HoloLensのように空間へ固定はできないので、画面内の左右位置で方向を表す。 */
+#subtitle-area.windows {
+  left: 50%;
+  right: auto;
+  width: 46%;
+  transform: translateX(-50%);
 }
 
 .subtitle-line {
@@ -54,11 +70,87 @@ body {
   word-break: break-word;
 }
 
-/* 接続状態 */
-#status-badge {
+/* ---------- ② 方向の円弧 ---------- */
+#compass {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  transform: translate(-50%, -50%);
+  width: min(46vh, 46vw);
+  height: min(46vh, 46vw);
+  opacity: 0.95;
+  pointer-events: none;
+}
+
+.compass-center {
+  fill: none;
+  stroke: rgba(255, 255, 255, 0.35);
+  stroke-width: 2;
+}
+
+.compass-me {
+  fill: rgba(255, 255, 255, 0.55);
+  font-size: 16px;
+  text-anchor: middle;
+}
+
+.compass-label {
+  fill: rgba(255, 255, 255, 0.45);
+  font-size: 20px;
+  text-anchor: middle;
+}
+
+/* 音源の円弧。speech=声、sound=声以外の音で色を分ける */
+.arc {
+  fill: none;
+  stroke-linecap: round;
+  stroke-width: 16;
+}
+
+.arc.speech { stroke: #4fc3f7; }
+.arc.sound  { stroke: #ffb74d; }
+
+/* ---------- ③ 音の種類（直近3件） ---------- */
+#sound-area {
+  position: absolute;
+  left: 16px;
+  bottom: 44px;
+  display: flex;
+  flex-direction: column-reverse; /* 新しいものが下に来る */
+  gap: 8px;
+}
+
+.sound-card {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  background: rgba(0, 0, 0, 0.75);
+  border-left: 4px solid #ffb74d;
+  border-radius: 8px;
+  padding: 8px 14px 8px 10px;
+  animation: pop-in 0.25s ease;
+}
+
+.sound-card.stale { opacity: 0.45; }
+
+.sound-icon { font-size: 26px; }
+.sound-name { font-size: 22px; }
+.sound-dir  { font-size: 22px; color: #fff; font-weight: bold; }
+.sound-conf { font-size: 14px; color: #9e9e9e; }
+
+@keyframes pop-in {
+  from { opacity: 0; transform: translateY(6px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+
+/* ---------- 状態表示 ---------- */
+#status-badge,
+#view-badge {
   position: absolute;
   bottom: 12px;
-  left: 12px;
   font-size: 13px;
   color: #888;
 }
+
+#status-badge { left: 12px; }
+#view-badge   { right: 12px; }

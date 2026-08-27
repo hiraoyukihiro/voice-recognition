@@ -62,3 +62,40 @@ XVF3800_INVERT = False      # 回転方向が逆に感じる場合True
 # --- 表示設定 ---
 WEBSOCKET_HOST = "localhost"
 WEBSOCKET_PORT = 8765
+
+# --- 音イベント検知設定（HoloSound論文の再現）---
+# 「今どんな音が鳴ったか」（ノック、火災報知器、電話の着信など19種）を判定して字幕とは別枠で表示する。
+# 論文: Guo et al. "HoloSound: Combining Speech and Sound Identification for DHH Users on a HMD" (ASSETS 2020)
+ENABLE_SOUND_EVENT = True
+SOUND_EVENT_ENGINE = "panns"     # 今はpannsのみ。差し替え時はprocessing/sound_event/に実装を足す
+
+# 論文2.2節: 16kHzで1秒ぶんのバッファを作り、スライディングウィンドウで判定し続ける。
+SOUND_EVENT_WINDOW = 1.0         # 秒: 一度に判定にかける音の長さ
+SOUND_EVENT_HOP = 0.5            # 秒: 何秒ごとに判定をやり直すか（短いほど反応が速いがCPUを食う）
+
+# 論文2.2節: 自信度50%未満・音量45dB未満は無視する。
+SOUND_EVENT_MIN_CONFIDENCE = 0.5
+SOUND_EVENT_MIN_DB = 45.0
+
+# dBFS（録音レベル基準の音量）→ dB SPL（実際の音の大きさ）へ変換する補正値。
+# マイクの感度によって違うため、機種ごとに測らないと正しい値にならない。
+# None のままだと上のSOUND_EVENT_MIN_DBによる足切りは行わず、自信度だけで判定する。
+# 校正手順: python tools/calibrate_db.py （スマホの騒音計アプリと同時に測る）
+SOUND_EVENT_DB_OFFSET = None
+
+# 同じ音が連続で何度も並ぶのを防ぐ。同じ種類の音は、この秒数のあいだ再表示しない。
+SOUND_EVENT_COOLDOWN = 3.0
+# 人の声が主成分の時は音イベントを出さない（字幕係と役割が重なるため。論文も非音声のみ表示）
+SOUND_EVENT_EXCLUDE_SPEECH = True
+# 学習済みモデルの置き場所。None = ~/panns_data/Cnn14_mAP=0.431.pth を自動で使う
+PANNS_CHECKPOINT = None
+
+# --- 表示設定（HoloSound論文のUI再現）---
+# 論文Figure 1: 直近3件の音を左下、最大4音源の方向を中央の円弧、字幕は上部または空間配置。
+SOUND_EVENT_HISTORY = 3          # 画面に残す音イベントの件数（論文: 3件）
+DIRECTION_SECTORS = 12           # 方向を何分割して表示するか（論文: 12方向）
+MAX_SOUND_SOURCES = 4            # 同時に円弧を出す音源の最大数（論文: 4）
+DIRECTION_BROADCAST_INTERVAL = 0.2  # 秒: 方向を画面へ送り直す間隔
+SOURCE_ARC_LIFETIME = 3.0        # 秒: 音が止まってから円弧が消えるまでの時間
+SUBTITLE_LINES = 3               # 字幕を何行ぶん残すか（論文の既定は2行、このアプリの仕様は3行）
+SUBTITLE_VIEW = "subtitles"      # "subtitles"（画面固定）/ "windows"（方向に応じて配置）。画面でVキー切替可

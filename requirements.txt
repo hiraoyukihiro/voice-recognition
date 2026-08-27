@@ -22,3 +22,7 @@ websockets>=12.0
 # direction detection (step 5: reSpeaker XVF3800 mic array)
 pyusb>=1.2.1
 libusb-package>=1.0.26; sys_platform == 'win32'
+
+# sound event recognition (HoloSound論文2.2節の再現: 音の種類を19種に分類)
+panns-inference>=0.1.1    # AudioSet 527種で学習済みのCNN14。初回実行時にモデル(約320MB)を~/panns_data/へ自動取得
+torchlibrosa>=0.1.0       # panns-inferenceがログメル特徴の計算に使う

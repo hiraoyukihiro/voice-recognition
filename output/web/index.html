@@ -3,14 +3,33 @@
 <head>
   <meta charset="UTF-8">
   <title>音声認識ディスプレイ</title>
-  <link rel="stylesheet" href="style.css?v=4">
+  <link rel="stylesheet" href="style.css?v=6">
 </head>
 <body>
   <div id="stage">
+    <!-- ① 字幕: 画面固定(subtitles) / 方向に応じて配置(windows) の2通り -->
     <div id="subtitle-area"></div>
+
+    <!-- ② 方向: 12分割の円弧を上から見た図で表示（最大4音源） -->
+    <svg id="compass" viewBox="0 0 400 400" aria-label="音の方向">
+      <g id="arc-layer"></g>
+      <g id="compass-base">
+        <circle cx="200" cy="200" r="26" class="compass-center"></circle>
+        <text x="200" y="205" class="compass-me">自分</text>
+        <text x="200" y="46"  class="compass-label">前</text>
+        <text x="200" y="366" class="compass-label">後</text>
+        <text x="36"  y="206" class="compass-label">左</text>
+        <text x="364" y="206" class="compass-label">右</text>
+      </g>
+    </svg>
+
+    <!-- ③ 音の種類: 直近3件を左下に表示 -->
+    <div id="sound-area"></div>
+
     <div id="status-badge">切断中...</div>
+    <div id="view-badge">表示: subtitles（Vキーで切替）</div>
   </div>
 
-  <script src="app.js?v=5"></script>
+  <script src="app.js?v=6"></script>
 </body>
 </html>
