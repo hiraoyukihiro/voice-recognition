@@ -349,7 +349,9 @@ async def recorder_loop_streaming(queue: asyncio.Queue):
 # 秒: Vosk自身の無音判定（AcceptWaveformがTrueを返すタイミング）は数秒間の完全な沈黙が
 # 必要で、会話の普通の間には遅すぎることを確認した。そのため、部分認識結果(PartialResult)が
 # これだけ変化しなければ「話が一段落した」とみなして先に確定させる、という二段構えにする。
-PARTIAL_STALL_TIMEOUT = 1.5
+# モデルの探索範囲を狭めて認識が2.7倍速くなった（実時間の74%→27%）ため、
+# 以前の1.5秒から短縮して字幕の確定を早めた（2026-08-27）。
+PARTIAL_STALL_TIMEOUT = 0.8
 
 
 async def pipeline_loop_streaming():
@@ -402,12 +404,12 @@ async def pipeline_loop_streaming():
             frame = await queue.get()
             utterance_frames.append(frame)
 
-            # --- 診断表示: 約3秒ごとに生RMSの最大値と認識途中経過を出す ---
+            # --- 診断表示: 約30秒ごとに音量の目安を出す（声が届いているかの確認用）---
             _diag_frame_count += 1
             _diag_max_rms = max(_diag_max_rms, float(np.sqrt(np.mean(frame ** 2))))
-            if _diag_frame_count >= 10:
-                print(f"  [診断] 直近3秒の最大RMS={_diag_max_rms:.4f} "
-                      f"(しきい値={SILENCE_THRESHOLD}) 途中経過=「{last_partial_text}」")
+            if _diag_frame_count >= 100:
+                print(f"  [音量] 直近30秒の最大={_diag_max_rms:.4f} "
+                      f"(0.02以上あれば声は十分届いています)")
                 _diag_frame_count = 0
                 _diag_max_rms = 0.0
 
