@@ -108,34 +108,33 @@ asr.transcribe(_dummy, config.SAMPLE_RATE)
 print("\n全モデルロード完了\n")
 
 # --- 方向検知 ---
-if config.DOA_MODE == "mic_array":
-    from processing.direction.xvf3800_doa import XVF3800DOA
+# reSpeaker実機のみ対応（ダミー実装は削除済み）。
+# 見つからない場合は方向検知なし（常に0度=正面扱い）で起動し、字幕機能はそのまま使える。
+from processing.direction.xvf3800_doa import XVF3800DOA
 
-    doa = None
-    for _attempt in range(5):
-        try:
-            doa = XVF3800DOA(
-                angle_offset=config.XVF3800_ANGLE_OFFSET,
-                invert=config.XVF3800_INVERT,
-            )
-            break
-        except RuntimeError as e:
-            print(f"  reSpeaker検出リトライ中... ({_attempt + 1}/5) {e}")
-            time.sleep(1.5)
+doa = None
+for _attempt in range(5):
+    try:
+        doa = XVF3800DOA(
+            angle_offset=config.XVF3800_ANGLE_OFFSET,
+            invert=config.XVF3800_INVERT,
+        )
+        break
+    except RuntimeError as e:
+        print(f"  reSpeaker検出リトライ中... ({_attempt + 1}/5) {e}")
+        time.sleep(1.5)
 
-    if doa is None:
-        print("  → reSpeakerが見つからないため、ダミー方向検知にフォールバックします")
-        from processing.direction.dummy_doa import DummyDOA
-        doa = DummyDOA(mode="sweep")
-    else:
-        # USBへの同期問い合わせを認識パイプラインのクリティカルパスから外すため、
-        # バックグラウンドスレッドで0.1秒ごとに読み直してキャッシュする方式に切り替える
-        doa.start()
-        print("  → 方向検知: reSpeaker XVF3800（実機、バックグラウンドポーリング0.1秒間隔）")
+if doa is None:
+    print("  → reSpeakerが見つからないため、方向検知なし（常に0度）で起動します")
 else:
-    from processing.direction.dummy_doa import DummyDOA
-    doa = DummyDOA(mode="sweep")
-    print("  → 方向検知: ダミー（sweep）")
+    # USBへの同期問い合わせを認識パイプラインのクリティカルパスから外すため、
+    # バックグラウンドスレッドで0.1秒ごとに読み直してキャッシュする方式に切り替える
+    doa.start()
+    print("  → 方向検知: reSpeaker XVF3800（実機、バックグラウンドポーリング0.1秒間隔）")
+
+
+def estimate_direction(audio: np.ndarray) -> float:
+    return doa.estimate(audio) if doa is not None else 0.0
 
 # --- WebSocketクライアント管理 ---
 clients: set = set()
@@ -276,7 +275,7 @@ async def pipeline_loop():
                     pending_last_seq = seq
                 continue
 
-            direction = await loop.run_in_executor(None, doa.estimate, audio_amp)
+            direction = await loop.run_in_executor(None, estimate_direction, audio_amp)
 
             now = time.time()
             is_continuation = (
@@ -364,7 +363,7 @@ async def pipeline_loop_streaming():
         if not text:
             return
 
-        direction = await loop.run_in_executor(None, doa.estimate, audio_amp)
+        direction = await loop.run_in_executor(None, estimate_direction, audio_amp)
 
         print(f"[{direction:.0f}°] {text}")
         await broadcast({
@@ -396,7 +395,7 @@ async def pipeline_loop_streaming():
                 if partial:
                     # 全文が読める段階（確定前）でも先に画面へ送る。確定を待つと
                     # 実際には損をしていない時間（0.87秒 vs 1.50秒、先生の資料より）を待つことになるため。
-                    direction = doa.estimate(amplified)
+                    direction = estimate_direction(amplified)
                     await broadcast({
                         "type": "subtitle",
                         "text": partial,

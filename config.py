@@ -46,8 +46,7 @@ WHISPER_CPU_THREADS = 4        # このPCの論理コア数に合わせる
 VOSK_MODEL_PATH = r"C:\Users\user\vosk-models\vosk-model-ja-0.22"  # 大型モデル（精度優先、小型モデルは同フォルダのvosk-model-small-ja-0.22）
 
 # --- 方向検知設定 ---
-DOA_MODE = "mic_array"    # dummy / mic_array
-
+# reSpeaker XVF3800実機のみ対応（ダミー実装は削除済み。未接続時は方向なし=常に0度で起動）。
 # reSpeaker XVF3800 使用時の校正パラメータ（tools/check_xvf3800.py で確認しながら調整）
 XVF3800_ANGLE_OFFSET = 0.0  # 正面(0度)とのズレを補正する度数
 XVF3800_INVERT = False      # 回転方向が逆に感じる場合True
