@@ -457,9 +457,20 @@ async def pipeline_loop_streaming():
         text = text.strip()
         if not text:
             return
-        # 1〜2文字はノイズ由来の誤認識がほぼすべて。3文字未満は字幕にしない
-        if len(text) < 3:
+
+        # --- 雑音由来のゴミ字幕を捨てる ---
+        # Voskは渡された音に必ず何か文字を当てはめるため、物音を「中」「小」のような
+        # 1文字に化けさせる。実測では「中」「小」「中 小」「小 小 小 小」が大量に出た。
+        tokens = text.split()
+        compact = text.replace(" ", "").replace("　", "")
+        # 1) 実質2文字以下（スペースを除いて数える。「中 小」もここで落ちる）
+        if len(compact) < 3:
             print(f"  [短文除外] 「{text}」")
+            return
+        # 2) 1文字の単語ばかりで、しかも種類が2つ以下（「小 小 小 小」「中 小 中」など）。
+        #    本物の日本語は3語以上あれば必ず2文字以上の語が混ざるため、これで消えない。
+        if len(tokens) >= 3 and all(len(t) == 1 for t in tokens) and len(set(tokens)) <= 2:
+            print(f"  [ゴミ除外] 同じ1文字の繰り返し: 「{text}」")
             return
 
         # 確定前の最終チェック: 発話全体を見て人の声でなければ字幕にしない
