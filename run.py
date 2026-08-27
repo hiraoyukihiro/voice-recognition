@@ -98,7 +98,7 @@ print("=" * 50)
 print("  音声認識システム 起動中...")
 print("=" * 50)
 
-print("\n[1/2] 音声認識モデルをロード中...")
+print("\n[1/3] 音声認識モデルをロード中...")
 if config.WHISPER_ENGINE == "faster_whisper":
     from processing.recognition.faster_whisper_asr import FasterWhisperASR
     asr = FasterWhisperASR(
@@ -116,7 +116,16 @@ else:
     asr = WhisperASR(model_size=config.WHISPER_MODEL, language=config.WHISPER_LANGUAGE)
 asr.load()
 
-print("[2/2] ウォームアップ中（初回のみ時間がかかります）...")
+print("[2/3] VAD（声かどうかの判定）モデルをロード中...")
+vad = None
+if config.ENABLE_VAD:
+    from processing.vad.silero_vad import SileroVAD
+    vad = SileroVAD(threshold=config.VAD_THRESHOLD, sample_rate=config.SAMPLE_RATE)
+    vad.load()
+else:
+    print("  → VAD無効（config.ENABLE_VAD=Falseのためスキップ）")
+
+print("[3/3] ウォームアップ中（初回のみ時間がかかります）...")
 _dummy = np.zeros(config.SAMPLE_RATE * 3, dtype=np.float32)
 asr.transcribe(_dummy, config.SAMPLE_RATE)
 
@@ -375,6 +384,9 @@ async def pipeline_loop_streaming():
     # 診断用: 数秒ごとに生の音量と認識途中経過を表示する（音が届いているかの切り分け用）
     _diag_frame_count = 0
     _diag_max_rms = 0.0
+    # VAD判定のキャッシュ（毎フレーム判定すると重いのでVAD_CHECK_INTERVALごとに更新）
+    _vad_is_speech = True
+    _vad_counter = 0
 
     async def finalize(text: str):
         nonlocal utterance_frames, last_partial_text, last_partial_change_time
@@ -388,6 +400,12 @@ async def pipeline_loop_streaming():
         text = text.strip()
         if not text:
             return
+
+        # 確定前の最終チェック: 発話全体を見て人の声でなければ字幕にしない
+        if vad is not None and len(raw_audio):
+            if not await loop.run_in_executor(None, vad.is_speech, raw_audio, config.SAMPLE_RATE):
+                print(f"  [VAD] 人の声ではないため字幕にしません: 「{text}」")
+                return
 
         direction = await loop.run_in_executor(None, estimate_direction, audio_amp)
 
@@ -413,6 +431,18 @@ async def pipeline_loop_streaming():
                 _diag_frame_count = 0
                 _diag_max_rms = 0.0
 
+            # --- 直近の音が人の声かどうかを判定（雑音を字幕にしないため）---
+            # 毎フレーム判定すると重いので、VAD_CHECK_INTERVALフレームごとに更新する。
+            if vad is not None:
+                _vad_counter += 1
+                if _vad_counter >= config.VAD_CHECK_INTERVAL:
+                    _vad_counter = 0
+                    tail_len = int(config.SAMPLE_RATE * config.VAD_CHECK_SECONDS)
+                    tail = np.concatenate(utterance_frames)[-tail_len:]
+                    _vad_is_speech = await loop.run_in_executor(
+                        None, vad.is_speech, tail, config.SAMPLE_RATE
+                    )
+
             amplified = amplify_frame(frame)
             pcm = (amplified * 32767).astype(np.int16).tobytes()
             is_final = await loop.run_in_executor(None, recognizer.AcceptWaveform, pcm)
@@ -427,7 +457,8 @@ async def pipeline_loop_streaming():
             if partial != last_partial_text:
                 last_partial_text = partial
                 last_partial_change_time = now
-                if partial:
+                # 人の声だと判定できている時だけ画面に出す（雑音由来の途中経過は表示しない）
+                if partial and _vad_is_speech:
                     # 全文が読める段階（確定前）でも先に画面へ送る。確定を待つと
                     # 実際には損をしていない時間（0.87秒 vs 1.50秒、先生の資料より）を待つことになるため。
                     direction = estimate_direction(amplified)
