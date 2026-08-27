@@ -19,8 +19,14 @@
 マイク → 声かどうか判定する係 → 文字にする係 → 画面に出す係
 (XVF3800)   (Silero VAD)       (Vosk)        (WebSocket→HTML)
     |
-    +──────→ 方向を知る係 (XVF3800内蔵のDOA) ─────────┘
+    +──────→ 方向を知る係 (XVF3800内蔵のDOA) ─────────┤
+    |                                                  |
+    +──────→ 音の種類を当てる係 (PANNs, 19種) ─────────┘
 ```
+
+（2026-08-27 追加）HoloSound論文の再現として「音の種類を当てる係」を追加した。
+ノック・火災報知器・電話の着信など19種の生活音を判定し、字幕とは別枠で画面左下に出す。
+詳細は「## 10. 音イベント検知（HoloSound再現）」を参照。
 
 ---
 
@@ -478,3 +484,49 @@ PROFILE = "pc"   # "pc" か "rpi4"
 - ❌ 「小型モデルなら軽いからVoskも速くなる」
   → **誤り。** 実測で小型のほうが遅く（実時間の131% vs 大型92%）、精度も悪かった。
   音響モデルが合わないと探索が広がるため。**大型モデル＋探索範囲を狭める設定が正解**（7-5）。
+
+---
+
+## 10. 音イベント検知（HoloSound論文の再現）
+
+論文: Guo et al. "HoloSound: Combining Speech and Sound Identification for DHH Users on a HMD" (ASSETS 2020)
+
+### 何をする係か
+字幕（人の言葉）とは別に、「今どんな音が鳴ったか」を判定して画面左下に出す。
+対象は生活上重要な19種（ノック・インターホン・火災報知器・電話・水の音・犬・拍手など）。
+
+### 使っているもの
+| 部分 | 中身 | 場所 |
+|---|---|---|
+| 判定AI | PANNs CNN14（AudioSet 527種で学習済み） | `processing/sound_event/panns_tagger.py` |
+| 19種の定義 | AudioSetのどのラベルに当たるかの対応表 | `processing/sound_event/labels.py` |
+| モデルの置き場 | `~/panns_data/Cnn14_mAP=0.431.pth`（約320MB、初回自動DL） | — |
+| 設定 | `config.py` の `SOUND_EVENT_*` | `config.py` |
+
+論文の足切り（自信度50%未満・45dB未満は無視）と、直近3件表示・12方向の円弧・
+最大4音源はすべて再現済み。字幕の2ビュー（subtitles/windows）は画面でVキー切替。
+
+### なぜVGGでなくPANNsか
+論文はVGGを19種に転移学習した（正解率84.9%）。同じ音源を自前で集めるのは大変なので、
+同じログメル入力のCNNで、AudioSetで学習済みのPANNsを使い、その527種の出力から19種ぶんを
+取り出す方式にした。19種を増減したい時は `labels.py` の表を直すだけでよい。
+
+### 実測（このPC、2026-08-27）
+- 判定1回: **約170ミリ秒**、0.5秒ごとに実行して **CPU 1コアの約34%**
+- モデル読み込み: 起動時に1回だけ約8秒
+- 人の声は「Speech」として正しく除外できることを確認（字幕係と二重にならない）
+
+### 未調整・注意
+- **音量(dB)の足切りが未校正**。`SOUND_EVENT_DB_OFFSET = None` のあいだは自信度だけで判定する。
+  `python tools/calibrate_db.py` でスマホの騒音計と突き合わせて校正する。
+- 本物の生活音での的中率はまだ未測定。`python tools/test_sound_event.py <WAV>` で確認できる
+  （19種に絞る前のAudioSet 527種の上位も出るので、外した時の原因が分かる）。
+
+### 追加した診断ツール
+| コマンド | 何を見るか |
+|---|---|
+| `python tools/test_sound_event.py` | マイクから5秒録って音の種類を判定 |
+| `python tools/test_sound_event.py <WAV>` | WAVを1秒ずつ判定（的中確認用） |
+| `python tools/test_sound_event.py --bench` | 判定1回の所要時間とCPU使用率を測る |
+| `python tools/calibrate_db.py` | 45dB足切りのための音量校正 |
+| `python tools/demo_display.py` | マイク・AIなしで画面（字幕/円弧/音カード）だけ確認 |
