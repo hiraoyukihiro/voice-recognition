@@ -457,6 +457,10 @@ async def pipeline_loop_streaming():
         text = text.strip()
         if not text:
             return
+        # 1〜2文字はノイズ由来の誤認識がほぼすべて。3文字未満は字幕にしない
+        if len(text) < 3:
+            print(f"  [短文除外] 「{text}」")
+            return
 
         # 確定前の最終チェック: 発話全体を見て人の声でなければ字幕にしない
         if vad is not None and len(raw_audio):

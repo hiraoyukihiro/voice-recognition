@@ -74,7 +74,7 @@ SOUND_EVENT_WINDOW = 1.0         # 秒: 一度に判定にかける音の長さ
 SOUND_EVENT_HOP = 0.5            # 秒: 何秒ごとに判定をやり直すか（短いほど反応が速いがCPUを食う）
 
 # 論文2.2節: 自信度50%未満・音量45dB未満は無視する。
-SOUND_EVENT_MIN_CONFIDENCE = 0.5
+SOUND_EVENT_MIN_CONFIDENCE = 0.7  # 0.5だと室内環境音で誤検知が多いため0.7に引き上げ
 SOUND_EVENT_MIN_DB = 45.0
 
 # dBFS（録音レベル基準の音量）→ dB SPL（実際の音の大きさ）へ変換する補正値。
