@@ -165,11 +165,17 @@ def amplify_frame(frame: np.ndarray) -> np.ndarray:
     RMSがSILENCE_THRESHOLD未満（＝無音）の場合は増幅しない。
     無音まで一律MAX_GAIN倍すると、静けさが持ち上がってノイズになり、
     Voskが「文が終わった」と判定できなくなるため（先生の資料の指摘）。
+
+    増幅率は「ピークがTARGET_PEAKを超えない範囲で最大MAX_GAIN倍」。
+    以前の一律MAX_GAIN倍は、大きめの声で波形が上限に張り付いて激しく音割れし、
+    音は届いているのにVoskが全く認識できない原因になっていた。
     """
     rms = float(np.sqrt(np.mean(frame ** 2)))
     if rms < SILENCE_THRESHOLD:
         return frame
-    return np.clip(frame * MAX_GAIN, -1.0, 1.0)
+    peak = float(np.max(np.abs(frame))) or 1e-6
+    gain = min(TARGET_PEAK / peak, MAX_GAIN)
+    return frame * gain
 
 
 async def ws_handler(websocket, path=None):
@@ -349,6 +355,9 @@ async def pipeline_loop_streaming():
     utterance_frames: list = []
     last_partial_text = ""
     last_partial_change_time = time.time()
+    # 診断用: 数秒ごとに生の音量と認識途中経過を表示する（音が届いているかの切り分け用）
+    _diag_frame_count = 0
+    _diag_max_rms = 0.0
 
     async def finalize(text: str):
         nonlocal utterance_frames, last_partial_text, last_partial_change_time
@@ -377,6 +386,15 @@ async def pipeline_loop_streaming():
         try:
             frame = await queue.get()
             utterance_frames.append(frame)
+
+            # --- 診断表示: 約3秒ごとに生RMSの最大値と認識途中経過を出す ---
+            _diag_frame_count += 1
+            _diag_max_rms = max(_diag_max_rms, float(np.sqrt(np.mean(frame ** 2))))
+            if _diag_frame_count >= 10:
+                print(f"  [診断] 直近3秒の最大RMS={_diag_max_rms:.4f} "
+                      f"(しきい値={SILENCE_THRESHOLD}) 途中経過=「{last_partial_text}」")
+                _diag_frame_count = 0
+                _diag_max_rms = 0.0
 
             amplified = amplify_frame(frame)
             pcm = (amplified * 32767).astype(np.int16).tobytes()
