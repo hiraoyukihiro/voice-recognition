@@ -43,13 +43,28 @@ print(f"  → マイク入力デバイス: {mic_device_index if mic_device_index
 # --- マイクストリーム（開きっぱなし） ---
 # record_chunk()/record_frame() はこのストリームから読み取るだけにし、
 # 呼び出すたびにマイクを開閉しない（開閉のたびに音が録れない時間が生じるため）。
+#
+# 重要: チャンネル数は必ずデバイスのネイティブ値で開くこと。
+# reSpeaker XVF3800（2ch）に対して channels=1 で開くと、2ch分のデータが
+# 1サンプルおきに交互に混ざったまま渡され、波形が壊れて認識が全く成立しない
+# （実測: 隣接サンプル差より1つ飛ばし差の方が小さいという異常、6-8kHzに23%の偽エネルギー、
+# 12秒録音しても実音声は6秒分だけ）。2026-08-27に判明・修正。
+_dev_info = sd.query_devices(mic_device_index) if mic_device_index is not None else sd.query_devices(kind="input")
+MIC_CHANNELS = max(1, int(_dev_info["max_input_channels"]))
+print(f"  → マイクチャンネル数: {MIC_CHANNELS}（デバイスのネイティブ値で開く）")
+
 mic_stream = sd.InputStream(
     samplerate=config.SAMPLE_RATE,
-    channels=1,
+    channels=MIC_CHANNELS,
     dtype="float32",
     device=mic_device_index,
 )
 mic_stream.start()
+
+
+def to_mono(audio: np.ndarray) -> np.ndarray:
+    """複数チャンネルを平均して1本にまとめる（1chならそのまま）。"""
+    return audio.mean(axis=1) if audio.ndim > 1 else audio
 
 # --- マイクごとの自動設定 ---
 # マイクの機種によって音量特性が違うため、実際に選ばれたデバイスの名前から機種を判定し、
@@ -149,7 +164,7 @@ def record_chunk() -> np.ndarray:
     audio, overflowed = mic_stream.read(frames)
     if overflowed:
         print("  [警告] マイク入力バッファがオーバーフローしました（処理が録音に追いついていません）")
-    return audio[:, 0]
+    return to_mono(audio)
 
 
 def normalize_audio(audio: np.ndarray) -> tuple:
@@ -311,7 +326,7 @@ def record_frame() -> np.ndarray:
     audio, overflowed = mic_stream.read(frames)
     if overflowed:
         print("  [警告] マイク入力バッファがオーバーフローしました（処理が録音に追いついていません）")
-    return audio[:, 0]
+    return to_mono(audio)
 
 
 async def recorder_loop_streaming(queue: asyncio.Queue):

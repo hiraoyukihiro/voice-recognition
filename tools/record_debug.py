@@ -13,6 +13,14 @@ import sounddevice as sd
 import soundfile as sf
 
 import config
+
+def _native_channels(device_index):
+    """デバイスのネイティブ入力チャンネル数を返す。
+    2chデバイスを1chで開くと2ch分が交互に混ざって波形が壊れるため必須（2026-08-27に判明）。"""
+    import sounddevice as _sd
+    info = _sd.query_devices(device_index) if device_index is not None else _sd.query_devices(kind="input")
+    return max(1, int(info["max_input_channels"]))
+
 from input.mic_input import find_input_device
 
 RECORD_SECONDS = 20
@@ -27,13 +35,13 @@ name = sd.query_devices(device_index)["name"] if device_index is not None else s
 print(f"録音デバイス: {device_index} - {name}")
 
 # run.pyと同じ開きっぱなしInputStream方式
-stream = sd.InputStream(samplerate=config.SAMPLE_RATE, channels=1, dtype="float32", device=device_index)
+stream = sd.InputStream(samplerate=config.SAMPLE_RATE, channels=_native_channels(device_index), dtype="float32", device=device_index)
 stream.start()
 print(f"\n=== 録音開始({RECORD_SECONDS}秒間)。マイクに向かって話し続けてください ===")
 frames = []
 for i in range(RECORD_SECONDS):
     audio, overflowed = stream.read(config.SAMPLE_RATE)
-    frames.append(audio[:, 0])
+    frames.append(audio.mean(axis=1))
     rms = float(np.sqrt(np.mean(audio ** 2)))
     print(f"  {i+1:2d}秒: RMS={rms:.4f}")
 stream.stop()

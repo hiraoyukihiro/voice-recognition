@@ -11,6 +11,14 @@ import numpy as np
 import sounddevice as sd
 
 import config
+
+def _native_channels(device_index):
+    """デバイスのネイティブ入力チャンネル数を返す。
+    2chデバイスを1chで開くと2ch分が交互に混ざって波形が壊れるため必須（2026-08-27に判明）。"""
+    import sounddevice as _sd
+    info = _sd.query_devices(device_index) if device_index is not None else _sd.query_devices(kind="input")
+    return max(1, int(info["max_input_channels"]))
+
 from input.mic_input import find_input_device
 from processing.recognition.vosk_asr import VoskASR
 
@@ -41,9 +49,9 @@ print(f"\n=== 3. {RECORD_SECONDS}秒間の録音＋文字起こし ===")
 input(f"Enterを押したら録音開始。{RECORD_SECONDS}秒間、マイクに向かって話してください...")
 
 frames = int(config.SAMPLE_RATE * RECORD_SECONDS)
-audio = sd.rec(frames, samplerate=config.SAMPLE_RATE, channels=1, dtype="float32", device=device_index)
+audio = sd.rec(frames, samplerate=config.SAMPLE_RATE, channels=_native_channels(device_index), dtype="float32", device=device_index)
 sd.wait()
-audio = audio[:, 0]
+audio = audio.mean(axis=1)
 
 rms = float(np.sqrt(np.mean(audio ** 2)))
 print(f"録音完了（RMS={rms:.4f}）")

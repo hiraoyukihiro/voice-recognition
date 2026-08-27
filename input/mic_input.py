@@ -31,12 +31,19 @@ def find_input_device(name_substr: str, prefer_hostapis: tuple = ("Windows WASAP
 
 
 class MicInput(AudioInputBase):
-    def __init__(self, sample_rate: int = 16000, channels: int = 1, device_index=None):
+    def __init__(self, sample_rate: int = 16000, channels: int = None, device_index=None):
+        # channels=None なら起動時にデバイスのネイティブ値を使う。
+        # 重要: 2chデバイス(reSpeaker XVF3800等)をchannels=1で開くと、2ch分のデータが
+        # 1サンプルおきに交互に混ざったまま渡され、波形が壊れて認識が成立しない（2026-08-27に判明）。
         super().__init__(sample_rate, channels)
         self.device_index = device_index
         self._stream = None
 
     def start(self) -> None:
+        if self.channels is None:
+            info = sd.query_devices(self.device_index) if self.device_index is not None \
+                else sd.query_devices(kind="input")
+            self.channels = max(1, int(info["max_input_channels"]))
         self._stream = sd.InputStream(
             samplerate=self.sample_rate,
             channels=self.channels,
@@ -44,7 +51,7 @@ class MicInput(AudioInputBase):
             device=self.device_index,
         )
         self._stream.start()
-        print(f"[MicInput] 開始 (device={self.device_index}, {self.sample_rate}Hz)")
+        print(f"[MicInput] 開始 (device={self.device_index}, {self.sample_rate}Hz, {self.channels}ch)")
 
     def stop(self) -> None:
         if self._stream:
@@ -56,4 +63,4 @@ class MicInput(AudioInputBase):
     def read_chunk(self, duration: float) -> np.ndarray:
         frames = int(self.sample_rate * duration)
         data, _ = self._stream.read(frames)
-        return data[:, 0]  # モノラルに変換
+        return data.mean(axis=1)  # 全チャンネルを平均してモノラルに変換
