@@ -9,7 +9,7 @@ MIC_DEVICE_NAME = "reSpeaker"  # 自動検出時にデバイス名でマッチ�
 # 含まれていれば対応する設定を自動適用する（run.py起動時に判定、上から順に最初に一致したものを使う）。
 # 新しいマイクを追加した場合はここにプロファイルを足すだけでよい。
 MIC_PROFILES = {
-    "reSpeaker": {"silence_threshold": 0.0045, "max_gain": 20.0},       # しきい値はUSBマイクと共通化。増幅上限はビームフォーミング内蔵で信号が強いため低め
+    "reSpeaker": {"silence_threshold": 0.0015, "max_gain": 20.0},       # reSpeakerは生の話し声RMSが0.002〜0.02程度と小さく、0.0045だと声まで無音扱いになり増幅されず認識がほぼ成立しなかったため下げた
     "USB Microphone": {"silence_threshold": 0.0045, "max_gain": 50.0},  # 音量が小さいマイク
 }
 DEFAULT_MIC_PROFILE = {"silence_threshold": 0.003, "max_gain": 20.0}  # 未知のマイク用の標準値
