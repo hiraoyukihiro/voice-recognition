@@ -1,5 +1,17 @@
 # 音声認識システム 引き継ぎメモ
-更新日: 2026-07-23
+更新日: 2026-08-27
+
+## 重要: 2026-08-27に大幅軽量化（機能を3つに絞った）
+動作が重く実用にならなかったため、以下の3機能だけを残して他は削除した:
+1. **音声認識**（マイク→Vosk→文字化）
+2. **字幕化**（WebSocket→ブラウザ表示）
+3. **方向検知**（reSpeaker XVF3800 DOA、未接続時はダミー）
+
+削除したもの: 話者分離（direction/resemblyzer/pyannote全実装）、話者色分け表示、
+コンパスUI、テーマ切替、デモモード、VAD、ノイズ除去、HTTP配信サーバー（字幕ページは
+`output/web/index.html` をfile://で直接開く方式に変更。ポート8080は使わなくなった）、
+旧世代パイプライン(run_step3/4.py, server.py)。
+軽量化前の全機能版は git履歴と `C:\Users\user\Desktop\音声認識_安定版\`（別スナップショット）に残っている。
 
 ## プロジェクト場所
 `C:\Users\user\Desktop\音声認識\`
@@ -9,15 +21,14 @@
 cd C:\Users\user\Desktop\音声認識
 python run.py
 ```
-起動途中で `DIARIZER_MODE = "pyannote"` の場合、HuggingFaceアクセストークンの入力を求められる（画面には表示されない。ファイルにも保存されない。入力後Enter）。
-ブラウザが自動で開く。開かない場合は `http://localhost:8080` を手動で開く。
+ブラウザが自動で開く。開かない場合は `output/web/index.html` を手動で開く（HTTPサーバーは廃止済み）。
 
 診断ツール:
 ```
 python tools/list_mics.py        # 接続中のマイク一覧
 python tools/check_xvf3800.py    # reSpeaker XVF3800のUSB制御・オーディオ入力の検出確認
-python tools/check_hf_token.py   # HuggingFaceトークン・pyannote.audioアクセスの診断（トークンはgetpass入力のみ）
 python tools/check_vosk.py       # Voskモデルのロード確認＋マイク録音での文字起こしテスト
+python tools/check_mic_gap.py    # マイク録音方式の診断
 ```
 
 ---

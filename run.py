@@ -1,11 +1,10 @@
 """
-全体統合パイプライン。これ1つを実行すれば全機能が動く。
+全体統合パイプライン（軽量版）。これ1つを実行すれば全機能が動く。
+機能は3つのみ: 音声認識（マイク→文字化）／字幕化（ブラウザ表示）／方向検知（DOA）。
 実行: python run.py
-ブラウザで http://localhost:8080 が自動で開く。
+ブラウザで output/web/index.html が自動で開く（配信サーバーは使わずファイルを直接開く）。
 """
 import asyncio
-import http.server
-import threading
 import time
 import webbrowser
 import traceback
@@ -23,13 +22,9 @@ import config
 # 毎回開き直し方式を使っていたが、tools/check_mic_gap.py で検証した結果、
 # 無音になるのはDirectSoundホストAPI経由の場合のみで、WASAPI/MME経由なら
 # 開きっぱなしのInputStreamで問題なく録音できることを確認した（2026-08-15）。
-# 一方sd.rec()の毎回開き直し方式は、この環境で実測9秒分の録音に約1.4〜5.5秒分
-# （16〜61%、負荷状況により変動）の欠落が生じることも確認済みのため、
-# 開きっぱなし方式に切り替える（find_input_deviceのホストAPI優先順位もWASAPI/MME優先に変更済み）。
-OVERLAP_RMS_RATIO = 2.0
 
 # --- 音量正規化設定 ---
-# 固定倍率だと声の大小でWhisperの精度が変わるため、ピーク音量基準で正規化する
+# 固定倍率だと声の大小で認識精度が変わるため、ピーク音量基準で正規化する
 TARGET_PEAK = 0.7
 
 # --- マイクデバイス解決 ---
@@ -88,7 +83,7 @@ print("=" * 50)
 print("  音声認識システム 起動中...")
 print("=" * 50)
 
-print("\n[1/4] 音声認識モデルをロード中...")
+print("\n[1/2] 音声認識モデルをロード中...")
 if config.WHISPER_ENGINE == "faster_whisper":
     from processing.recognition.faster_whisper_asr import FasterWhisperASR
     asr = FasterWhisperASR(
@@ -106,65 +101,11 @@ else:
     asr = WhisperASR(model_size=config.WHISPER_MODEL, language=config.WHISPER_LANGUAGE)
 asr.load()
 
-print("[2/4] VADモデルをロード中...")
-vad = None
-if config.ENABLE_VAD:
-    from processing.vad.silero_vad import SileroVAD
-    vad = SileroVAD(threshold=config.VAD_THRESHOLD, sample_rate=config.SAMPLE_RATE)
-    vad.load()
-else:
-    print("  → VAD無効（config.ENABLE_VAD=Falseのためスキップ）")
-
-print("[3/4] 話者識別モデルをロード中...")
-direction_diarizer = None
-if config.DIARIZER_MODE == "direction":
-    # 声の特徴量計算（resemblyzer/pyannote）を丸ごとスキップする。
-    # 「誰なのか」ではなく「さっきと違う方向」の区別だけで足りるため
-    # （先生の資料 why-we-changed.pdf の提案）。
-    from processing.diarization.direction_diarizer import DirectionDiarizer
-    direction_diarizer = DirectionDiarizer(angle_tolerance=config.DIRECTION_ANGLE_TOLERANCE)
-    print(f"  → 話者分離: 方向ベース（許容差={config.DIRECTION_ANGLE_TOLERANCE}度、モデルロードなし）")
-elif config.DIARIZER_MODE == "pyannote":
-    import getpass
-    hf_token = getpass.getpass(
-        "HuggingFaceアクセストークンを入力してください（画面には表示されません。ファイルには保存されません）: "
-    )
-    from processing.diarization.pyannote_diarizer import PyannoteEmbedder
-    embedder = PyannoteEmbedder(hf_token)
-    embedder.load()
-    hf_token = None  # メモリ上の参照を手放す（load()側でも既に破棄済み）
-
-    def get_embedding(audio: np.ndarray) -> np.ndarray:
-        return embedder.embed(audio, config.SAMPLE_RATE)
-else:
-    from resemblyzer import VoiceEncoder, preprocess_wav
-    encoder = VoiceEncoder()
-
-    def get_embedding(audio: np.ndarray) -> np.ndarray:
-        wav = preprocess_wav(audio, source_sr=config.SAMPLE_RATE)
-        return encoder.embed_utterance(wav)
-
-print("[4/4] ウォームアップ中（初回のみ時間がかかります）...")
+print("[2/2] ウォームアップ中（初回のみ時間がかかります）...")
 _dummy = np.zeros(config.SAMPLE_RATE * 3, dtype=np.float32)
 asr.transcribe(_dummy, config.SAMPLE_RATE)
 
 print("\n全モデルロード完了\n")
-
-# --- 話者管理 ---
-# しきい値はresemblyzerとpyannote.audioで埋め込みベクトルのスコア傾向が異なるため別々に設定する
-speaker_embeddings: dict[str, np.ndarray] = {}
-speaker_count = 0
-if config.DIARIZER_MODE == "pyannote":
-    SIMILARITY_THRESHOLD = 0.5    # これ以上なら確実に同一話者とみなす（pyannote用に調整中）
-    NEW_SPEAKER_THRESHOLD = 0.15  # これ未満なら確実に新しい話者（pyannote用に調整中）
-else:
-    SIMILARITY_THRESHOLD = 0.75   # これ以上なら確実に同一話者とみなす
-    NEW_SPEAKER_THRESHOLD = 0.35  # これ未満なら確実に新しい話者。マイク音質が悪く同一人物でも声の特徴がブレるため低めに設定
-EMBEDDING_UPDATE_RATE = 0.3       # 高確信度で一致した際、話者の声の特徴を少しずつ更新する重み
-NEW_SPEAKER_COOLDOWN = 8.0        # 秒: 新規話者登録の最短間隔。声のブレによる誤った新規話者登録の連発を防ぐ
-last_speaker_id = "speaker_1"
-last_rms = 0.0
-last_new_speaker_time = 0.0
 
 # --- 方向検知 ---
 if config.DOA_MODE == "mic_array":
@@ -200,54 +141,6 @@ else:
 clients: set = set()
 
 
-def identify_speaker(audio: np.ndarray, current_rms: float, direction: float = 0.0) -> str:
-    if config.DIARIZER_MODE == "direction":
-        return direction_diarizer.identify(direction)
-
-    global speaker_count, last_speaker_id, last_rms, last_new_speaker_time
-    try:
-        if last_rms > SILENCE_THRESHOLD and current_rms > last_rms * OVERLAP_RMS_RATIO:
-            return last_speaker_id
-        if len(audio) < config.SAMPLE_RATE * 0.5:
-            return last_speaker_id
-        embedding = get_embedding(audio)
-        # resemblyzer/pyannoteどちらでも比較できるよう、正規化してコサイン類似度として扱う
-        embedding = embedding / (np.linalg.norm(embedding) or 1.0)
-        best_id, best_score = None, -1.0
-        for spk_id, emb in speaker_embeddings.items():
-            score = float(np.dot(embedding, emb))
-            if score > best_score:
-                best_score = score
-                best_id = spk_id
-
-        print(f"  [話者スコア] best_id={best_id} best_score={best_score:.3f}")
-        now = time.time()
-        if best_id is None or (
-            best_score < NEW_SPEAKER_THRESHOLD
-            and now - last_new_speaker_time > NEW_SPEAKER_COOLDOWN
-        ):
-            # 確実に新しい話者。ただし直近で新規登録したばかりの場合は
-            # 同時発話で声が混ざったブレの可能性が高いため、登録を抑制してcooldown中は既存話者に割り当てる
-            speaker_count += 1
-            best_id = f"speaker_{speaker_count}"
-            speaker_embeddings[best_id] = embedding
-            last_new_speaker_time = now
-            print(f"  → 新しい話者を検出: {best_id}")
-        elif best_score >= SIMILARITY_THRESHOLD:
-            # 高確信度の一致：声の特徴を少しずつ更新し、自然な声の変化に追従させる
-            speaker_embeddings[best_id] = (
-                (1 - EMBEDDING_UPDATE_RATE) * speaker_embeddings[best_id]
-                + EMBEDDING_UPDATE_RATE * embedding
-            )
-        # NEW_SPEAKER_THRESHOLD以上SIMILARITY_THRESHOLD未満（不確実な一致）の場合は
-        # 同時発話などで声が混ざった可能性が高いため、既存の推定話者に割り当てるだけで登録は更新しない
-
-        last_speaker_id = best_id
-        return best_id
-    except Exception as e:
-        return last_speaker_id
-
-
 def transcribe(audio: np.ndarray) -> str:
     return asr.transcribe(audio, config.SAMPLE_RATE)
 
@@ -260,19 +153,8 @@ def record_chunk() -> np.ndarray:
     return audio[:, 0]
 
 
-ENABLE_NOISE_REDUCTION = False  # 増幅前の小さい音に掛けると声の成分まで削って認識が崩れる疑いがあるため無効化（「いい感じ」だった2026-07-27時点の構成に合わせる）
-
-
 def normalize_audio(audio: np.ndarray) -> tuple:
-    """
-    （必要なら）ノイズ除去してからピーク音量基準で正規化する。
-    マイクの物理的な感度が低く強い増幅が必要なため、増幅前にノイズ除去を挟むと
-    ノイズも一緒に増幅されてしまうのを軽減できるが、処理時間が1〜2秒増える。
-    戻り値: (正規化後の音声, 適用した増幅率)
-    """
-    if ENABLE_NOISE_REDUCTION:
-        import noisereduce as nr
-        audio = nr.reduce_noise(y=audio, sr=config.SAMPLE_RATE)
+    """ピーク音量基準で正規化する。戻り値: (正規化後の音声, 適用した増幅率)"""
     peak = float(np.max(np.abs(audio))) or 1e-6
     gain = min(TARGET_PEAK / peak, MAX_GAIN)
     return np.clip(audio * gain, -1.0, 1.0), gain
@@ -308,25 +190,6 @@ async def broadcast(payload: dict):
     await asyncio.gather(*[c.send(msg) for c in clients], return_exceptions=True)
 
 
-def start_http_server():
-    """output/web/ を HTTP で配信するサーバーをスレッドで起動"""
-    web_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "output", "web")
-
-    class Handler(http.server.SimpleHTTPRequestHandler):
-        def __init__(self, *args, **kwargs):
-            super().__init__(*args, directory=web_dir, **kwargs)
-        def log_message(self, *args):
-            pass  # アクセスログを非表示
-        def end_headers(self):
-            self.send_header("Cache-Control", "no-store, no-cache, must-revalidate")
-            super().end_headers()
-
-    server = http.server.ThreadingHTTPServer(("", config.WEB_PORT), Handler)
-    t = threading.Thread(target=server.serve_forever, daemon=True)
-    t.start()
-    print(f"[HTTP] http://localhost:{config.WEB_PORT}")
-
-
 async def recorder_loop(queue: asyncio.Queue):
     """
     録音だけを専門に繰り返す。認識処理（重い）とは切り離すことで、
@@ -360,13 +223,12 @@ async def recorder_loop(queue: asyncio.Queue):
 FLUSH_TIMEOUT = config.CHUNK_DURATION + 1.5
 
 # 秒: 無音判定に頼らず、これだけ経ったら強制的にそこまでの内容を字幕として確定する。
-# 環境ノイズがしきい値を超え続けると無音が検知できず、話者も変わらない場合
+# 環境ノイズがしきい値を超え続けると無音が検知できない場合、
 # 字幕が永遠に確定・表示されないままになるため、その安全策として設ける。
 MAX_PENDING_DURATION = 8.0
 
 
 async def pipeline_loop():
-    global last_rms
     loop = asyncio.get_event_loop()
     # 多少の詰まりは全部処理できるよう猶予を持たせつつ、無限に遅延が蓄積しないよう上限は設ける
     queue: asyncio.Queue = asyncio.Queue(maxsize=8)
@@ -375,23 +237,20 @@ async def pipeline_loop():
 
     # 長い文がチャンクの境界で分割されても1つの字幕としてまとめて表示するためのバッファ
     pending_text = ""
-    pending_speaker_id = None
     pending_direction = None
     pending_last_seq = None
     pending_started_at = 0.0
 
     async def flush():
-        nonlocal pending_text, pending_speaker_id, pending_direction, pending_last_seq, pending_started_at
+        nonlocal pending_text, pending_direction, pending_last_seq, pending_started_at
         if pending_text:
-            print(f"[{pending_speaker_id} | {pending_direction:.0f}°] {pending_text}")
+            print(f"[{pending_direction:.0f}°] {pending_text}")
             await broadcast({
                 "type": "subtitle",
-                "speaker_id": pending_speaker_id,
                 "text": pending_text,
                 "direction": pending_direction,
             })
         pending_text = ""
-        pending_speaker_id = None
         pending_direction = None
         pending_last_seq = None
         pending_started_at = 0.0
@@ -404,45 +263,24 @@ async def pipeline_loop():
                 await flush()
                 continue
 
-            t0 = time.time()
             audio_amp, gain = await loop.run_in_executor(None, normalize_audio, audio)
-            t_norm1 = time.time()
+            t_asr0 = time.time()
             print(f"\n[音声検出 RMS={rms:.4f} gain={gain:.1f}倍] 認識中...")
 
-            if vad is not None:
-                speech_detected = await loop.run_in_executor(
-                    None, vad.is_speech, audio_amp, config.SAMPLE_RATE
-                )
-                if not speech_detected:
-                    print(f"  [VAD] 声ではないと判定（車の音などのノイズの可能性）。スキップ")
-                    last_rms = rms
-                    if pending_text and pending_last_seq is not None and seq == pending_last_seq + 1:
-                        pending_last_seq = seq
-                    continue
-
             text = await loop.run_in_executor(None, transcribe, audio_amp)
-            t_asr1 = time.time()
-            print(f"  [処理時間] ノイズ除去={t_norm1-t0:.2f}s 認識={t_asr1-t_norm1:.2f}s")
+            print(f"  [処理時間] 認識={time.time()-t_asr0:.2f}s")
             if not text:
-                last_rms = rms
-                # 文字が得られなくても、直前と同じ話者が続いている可能性があるチャンクなら
+                # 文字が得られなくても、発話が続いている可能性があるチャンクなら
                 # 連番だけは更新し、次の本物のチャンクが「文の続き」と正しく判定されるようにする
                 if pending_text and pending_last_seq is not None and seq == pending_last_seq + 1:
                     pending_last_seq = seq
                 continue
 
             direction = await loop.run_in_executor(None, doa.estimate, audio_amp)
-            t_spk0 = time.time()
-            speaker_id = await loop.run_in_executor(
-                None, identify_speaker, audio_amp, rms, direction
-            )
-            print(f"  [処理時間] 話者判定={time.time()-t_spk0:.2f}s")
-            last_rms = rms
 
             now = time.time()
             is_continuation = (
                 pending_text
-                and pending_speaker_id == speaker_id
                 and pending_last_seq is not None
                 and seq == pending_last_seq + 1
                 and now - pending_started_at < MAX_PENDING_DURATION
@@ -452,7 +290,6 @@ async def pipeline_loop():
             else:
                 await flush()
                 pending_text = text
-                pending_speaker_id = speaker_id
                 pending_started_at = now
             pending_direction = direction
             pending_last_seq = seq
@@ -503,14 +340,7 @@ async def pipeline_loop_streaming():
       1. Voskが自分で無音を検知した場合はその結果(Result)を使う（一番正確）
       2. それより前に、部分認識結果(PartialResult)がPARTIAL_STALL_TIMEOUT秒
          変化しなくなったら、そこで先に区切って確定する（体感速度のため）
-
-    簡略化のため、以下は従来方式と異なる（十分な精度が確認できれば見直す）:
-    - 増幅は発話ごとのピーク基準ではなく固定倍率（MAX_GAIN）。フレームごとに
-      倍率が変わると単語の途中で音量が急変してしまうため。
-    - ノイズ除去(noisereduce)は短いフレーム単位では効果が薄く重いため適用しない。
-    - VADは確定した1発話分の音声に対してまとめて適用する（フレーム単位ではない）。
     """
-    global last_rms
     loop = asyncio.get_event_loop()
     queue: asyncio.Queue = asyncio.Queue(maxsize=20)
     asyncio.create_task(recorder_loop_streaming(queue))
@@ -523,37 +353,22 @@ async def pipeline_loop_streaming():
 
     async def finalize(text: str):
         nonlocal utterance_frames, last_partial_text, last_partial_change_time
-        global last_rms
         raw_audio = np.concatenate(utterance_frames) if utterance_frames else np.zeros(0, dtype=np.float32)
         utterance_frames = []
         last_partial_text = ""
         last_partial_change_time = time.time()
-        # VAD・話者判定・方向検知は、Voskの認識に使ったのと同じ増幅後の音声で行う。
-        # 増幅前の生の音声（このマイクは音量が小さい）のままVADにかけると、
-        # 実際は声なのに小さすぎて「声ではない」と誤判定しやすくなるため。
+        # 方向検知は、Voskの認識に使ったのと同じ増幅後の音声で行う
         audio_amp = np.clip(raw_audio * MAX_GAIN, -1.0, 1.0) if len(raw_audio) else raw_audio
 
         text = text.strip()
         if not text:
             return
 
-        # SILENCE_THRESHOLDは増幅前の生スケールで調整された値のため、rmsも生の音声から計算する
-        rms = float(np.sqrt(np.mean(raw_audio ** 2))) if len(raw_audio) else 0.0
-
-        if vad is not None:
-            speech_detected = await loop.run_in_executor(None, vad.is_speech, audio_amp, config.SAMPLE_RATE)
-            if not speech_detected:
-                print(f"  [VAD] 声ではないと判定（ノイズの可能性）。スキップ: 「{text}」")
-                return
-
         direction = await loop.run_in_executor(None, doa.estimate, audio_amp)
-        speaker_id = await loop.run_in_executor(None, identify_speaker, audio_amp, rms, direction)
-        last_rms = rms
 
-        print(f"[{speaker_id} | {direction:.0f}°] {text}")
+        print(f"[{direction:.0f}°] {text}")
         await broadcast({
             "type": "subtitle",
-            "speaker_id": speaker_id,
             "text": text,
             "direction": direction,
             "is_final": True,
@@ -581,11 +396,9 @@ async def pipeline_loop_streaming():
                 if partial:
                     # 全文が読める段階（確定前）でも先に画面へ送る。確定を待つと
                     # 実際には損をしていない時間（0.87秒 vs 1.50秒、先生の資料より）を待つことになるため。
-                    # 話者判定(embedding)は重いため途中経過では省略し、直近確定した話者をそのまま使う。
                     direction = doa.estimate(amplified)
                     await broadcast({
                         "type": "subtitle",
-                        "speaker_id": last_speaker_id,
                         "text": partial,
                         "direction": direction,
                         "is_final": False,
@@ -604,9 +417,6 @@ async def pipeline_loop_streaming():
 
 
 async def main():
-    # HTTPサーバー起動
-    start_http_server()
-
     # WebSocketサーバー起動
     for attempt in range(10):
         try:
@@ -623,10 +433,10 @@ async def main():
 
     print(f"[WebSocket] ws://{config.WEBSOCKET_HOST}:{config.WEBSOCKET_PORT}")
 
-    # ブラウザを自動で開く
-    url = f"http://localhost:{config.WEB_PORT}"
-    threading.Timer(1.0, lambda: webbrowser.open(url)).start()
-    print(f"[ブラウザ] {url} を自動で開きます\n")
+    # 字幕ページをブラウザで直接開く（HTTP配信サーバーは廃止しWebSocketのみ使用）
+    page = os.path.join(os.path.dirname(os.path.abspath(__file__)), "output", "web", "index.html")
+    webbrowser.open(f"file:///{page}")
+    print(f"[ブラウザ] {page} を開きます\n")
 
     use_streaming = config.STREAMING_ASR and config.WHISPER_ENGINE == "vosk"
     if config.STREAMING_ASR and not use_streaming:

@@ -5,7 +5,6 @@ from dataclasses import dataclass
 
 @dataclass
 class SubtitleEvent:
-    speaker_id: str    # "speaker_1" など
     text: str          # 認識テキスト
     direction: float   # 0〜359度
 

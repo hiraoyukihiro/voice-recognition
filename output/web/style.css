@@ -1,243 +1,64 @@
+/* 最小構成: 黒背景に字幕（方向矢印つき）を上部固定で表示するだけ */
 * {
-  box-sizing: border-box;
   margin: 0;
   padding: 0;
-}
-
-html, body {
-  height: 100%;
-  background: #202020;
+  box-sizing: border-box;
 }
 
 body {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  font-family: 'Segoe UI', 'Hiragino Sans', sans-serif;
+  background: #000;
+  color: #fff;
+  font-family: "Yu Gothic UI", "Meiryo", sans-serif;
+  overflow: hidden;
 }
 
-/* ---- テーマ変数 ---- */
-:root[data-theme="dark"] {
-  --stage-bg: #0d0d1a;
-  --subtitle-bg: rgba(0, 0, 0, 0.55);
-  --subtitle-text-dim: 0.4;
-  --spk-a: #ffaa44;
-  --spk-b: #44ddff;
-  --spk-c: #ff6688;
-  --spk-d: #aa88ff;
-  --spk-e: #44ffaa;
-  --spk-f: #ffff44;
-  --ui-fg: #e8e8e8;
-  --ui-bg: rgba(0, 0, 0, 0.4);
-}
-
-:root[data-theme="light"] {
-  --stage-bg: linear-gradient(to bottom, #79c2e6 0%, #a9d8ec 45%, #bfe3c2 55%, #8fce9c 100%);
-  --subtitle-bg: rgba(0, 0, 0, 0.55);
-  --subtitle-text-dim: 0.4;
-  --spk-a: #e69900;
-  --spk-b: #0099cc;
-  --spk-c: #cc2255;
-  --spk-d: #7744cc;
-  --spk-e: #008844;
-  --spk-f: #cc8800;
-  --ui-fg: #1a1a1a;
-  --ui-bg: rgba(255, 255, 255, 0.55);
-}
-
-/* ---- ステージ（Even G2想定: 576x288） ---- */
 #stage {
   position: relative;
-  width: 576px;
-  height: 288px;
-  background: var(--stage-bg);
-  overflow: hidden;
-  font-size: 9.5px;
+  width: 100vw;
+  height: 100vh;
 }
 
-/* ---- 字幕エリア（上部固定、直近3行） ---- */
+/* 字幕: 画面上部固定・直近3行 */
 #subtitle-area {
   position: absolute;
-  top: 0;
-  left: 0;
-  right: 0;
+  top: 16px;
+  left: 16px;
+  right: 16px;
   display: flex;
   flex-direction: column;
-  padding: 4px;
-  gap: 2px;
+  gap: 8px;
 }
 
 .subtitle-line {
+  background: rgba(0, 0, 0, 0.75);
+  border-radius: 8px;
+  padding: 10px 14px;
+  font-size: 28px;
+  line-height: 1.4;
   display: flex;
-  align-items: center;
-  gap: 5px;
-  padding: 3px 6px;
-  background: var(--subtitle-bg);
-  border-radius: 3px;
-  opacity: var(--subtitle-text-dim);
-  transition: opacity 0.4s ease;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
+  align-items: baseline;
+  gap: 10px;
 }
 
-.subtitle-line.active {
-  opacity: 1;
-}
-
-/* 認識中（未確定）の行: 確定後と見分けられるよう少し透過を残す */
-.subtitle-line.pending {
-  opacity: 0.75;
-}
-
-.subtitle-dot {
-  flex: 0 0 auto;
-  width: 5px;
-  height: 5px;
-  border-radius: 50%;
-}
-
-.subtitle-speaker-mark {
-  flex: 0 0 auto;
-  font-size: 6px;
-  line-height: 1;
-  opacity: 0.8;
-  color: var(--ui-fg);
+.subtitle-line.pending .subtitle-text {
+  opacity: 0.6; /* 認識途中（未確定）はうっすら表示 */
 }
 
 .subtitle-arrow {
-  flex: 0 0 auto;
-  color: #ffffff;
-  font-size: 10px;
-  line-height: 1;
+  flex-shrink: 0;
+  color: #fff;
+  font-weight: bold;
 }
 
 .subtitle-text {
-  flex: 1 1 auto;
-  overflow: hidden;
-  text-overflow: ellipsis;
+  word-break: break-word;
 }
 
-/* 話者ごとの色 */
-.spk-a { color: var(--spk-a); }
-.spk-a .subtitle-dot { background: var(--spk-a); }
-.spk-b { color: var(--spk-b); }
-.spk-b .subtitle-dot { background: var(--spk-b); }
-.spk-c { color: var(--spk-c); }
-.spk-c .subtitle-dot { background: var(--spk-c); }
-.spk-d { color: var(--spk-d); }
-.spk-d .subtitle-dot { background: var(--spk-d); }
-.spk-e { color: var(--spk-e); }
-.spk-e .subtitle-dot { background: var(--spk-e); }
-.spk-f { color: var(--spk-f); }
-.spk-f .subtitle-dot { background: var(--spk-f); }
-
-/* ---- コンパス（右下固定） ---- */
-#compass {
-  --compass-size: 68px;
-  position: absolute;
-  right: 8px;
-  bottom: 8px;
-  width: var(--compass-size);
-  height: var(--compass-size);
-}
-
-.compass-ring {
-  position: absolute;
-  inset: 0;
-  border-radius: 50%;
-  border: 1.5px solid rgba(0, 200, 100, 0.4);
-  background: rgba(0, 0, 0, 0.15);
-}
-
-.compass-label {
-  position: absolute;
-  font-size: 8px;
-  color: rgba(0, 200, 100, 0.4);
-  transform: translate(-50%, -50%);
-}
-
-.label-front {
-  top: 10%;
-  left: 50%;
-  color: rgba(0, 200, 100, 0.8);
-}
-
-.label-back {
-  top: 90%;
-  left: 50%;
-}
-
-.label-left {
-  top: 50%;
-  left: 12%;
-}
-
-.label-right {
-  top: 50%;
-  left: 88%;
-}
-
-#compass-needle {
-  position: absolute;
-  left: 50%;
-  top: 50%;
-  width: 2px;
-  height: 40%;
-  background: #00cc66;
-  transform-origin: 50% 100%;
-  transform: translate(-50%, -100%) rotate(0deg);
-  transition: transform 0.3s ease-out;
-  border-radius: 1px;
-}
-
-.compass-center {
-  position: absolute;
-  left: 50%;
-  top: 50%;
-  width: 6px;
-  height: 6px;
-  border-radius: 50%;
-  background: rgba(0, 200, 100, 0.7);
-  transform: translate(-50%, -50%);
-}
-
-/* ---- UI操作ボタン ---- */
+/* 接続状態 */
 #status-badge {
   position: absolute;
-  left: 4px;
-  bottom: 4px;
-  font-size: 8px;
-  padding: 2px 6px;
-  border-radius: 3px;
-  background: var(--ui-bg);
-  color: var(--ui-fg);
-  opacity: 0.75;
-}
-
-#theme-toggle,
-#demo-toggle {
-  position: absolute;
-  top: 4px;
-  font-size: 8px;
-  padding: 2px 6px;
-  border-radius: 3px;
-  border: none;
-  background: var(--ui-bg);
-  color: var(--ui-fg);
-  opacity: 0.6;
-  cursor: pointer;
-}
-
-#theme-toggle:hover,
-#demo-toggle:hover {
-  opacity: 1;
-}
-
-#theme-toggle {
-  right: 4px;
-}
-
-#demo-toggle {
-  right: 48px;
+  bottom: 12px;
+  left: 12px;
+  font-size: 13px;
+  color: #888;
 }

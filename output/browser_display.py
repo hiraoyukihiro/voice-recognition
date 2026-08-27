@@ -36,7 +36,6 @@ class BrowserDisplay(DisplayBase):
             return
         payload = json.dumps({
             "type": "subtitle",
-            "speaker_id": event.speaker_id,
             "text": event.text,
             "direction": event.direction,
         }, ensure_ascii=False)
