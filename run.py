@@ -208,6 +208,30 @@ def transcribe(audio: np.ndarray) -> str:
     return asr.transcribe(audio, config.SAMPLE_RATE)
 
 
+def garbage_reason(text: str):
+    """
+    雑音由来のゴミ字幕なら理由を、まともな言葉ならNoneを返す。
+
+    Voskは渡された音に必ず何か文字を当てはめるため、物音を「中」「小」のような
+    1文字に化けさせる。実測では「中」「小」「中 小」「小 小 小 小」が大量に出た。
+    確定時だけでなく途中経過にも同じ判定をかけること。
+    途中経過を素通しにすると、確定時に捨てたゴミが画面に出たまま残る。
+    """
+    text = text.strip()
+    if not text:
+        return "空"
+    tokens = text.split()
+    compact = text.replace(" ", "").replace("　", "")
+    # 1) 実質2文字以下（スペースを除いて数える。「中 小」もここで落ちる）
+    if len(compact) < 3:
+        return "短文"
+    # 2) 1文字の単語ばかりで、しかも種類が2つ以下（「小 小 小 小」「中 小 中」など）。
+    #    本物の日本語は3語以上あれば必ず2文字以上の語が混ざるため、これで消えない。
+    if len(tokens) >= 3 and all(len(t) == 1 for t in tokens) and len(set(tokens)) <= 2:
+        return "同じ1文字の繰り返し"
+    return None
+
+
 def record_chunk() -> np.ndarray:
     frames = int(config.SAMPLE_RATE * config.CHUNK_DURATION)
     audio, overflowed = mic_stream.read(frames)
@@ -457,28 +481,26 @@ async def pipeline_loop_streaming():
         audio_amp = np.clip(raw_audio * MAX_GAIN, -1.0, 1.0) if len(raw_audio) else raw_audio
 
         text = text.strip()
+
+        # 途中経過をすでに画面に出している場合、ここで捨てると画面に出っぱなしになる。
+        # 捨てる時は必ずブラウザにも「今の途中経過を消して」と伝えること。
+        async def reject(reason: str):
+            print(f"  [{reason}] 「{text}」")
+            await broadcast({"type": "subtitle_cancel"})
+
         if not text:
+            await broadcast({"type": "subtitle_cancel"})
             return
 
-        # --- 雑音由来のゴミ字幕を捨てる ---
-        # Voskは渡された音に必ず何か文字を当てはめるため、物音を「中」「小」のような
-        # 1文字に化けさせる。実測では「中」「小」「中 小」「小 小 小 小」が大量に出た。
-        tokens = text.split()
-        compact = text.replace(" ", "").replace("　", "")
-        # 1) 実質2文字以下（スペースを除いて数える。「中 小」もここで落ちる）
-        if len(compact) < 3:
-            print(f"  [短文除外] 「{text}」")
-            return
-        # 2) 1文字の単語ばかりで、しかも種類が2つ以下（「小 小 小 小」「中 小 中」など）。
-        #    本物の日本語は3語以上あれば必ず2文字以上の語が混ざるため、これで消えない。
-        if len(tokens) >= 3 and all(len(t) == 1 for t in tokens) and len(set(tokens)) <= 2:
-            print(f"  [ゴミ除外] 同じ1文字の繰り返し: 「{text}」")
+        reason = garbage_reason(text)
+        if reason:
+            await reject(reason + "除外")
             return
 
         # 確定前の最終チェック: 発話全体を見て人の声でなければ字幕にしない
         if vad is not None and len(raw_audio):
             if not await loop.run_in_executor(None, vad.is_speech, raw_audio, config.SAMPLE_RATE):
-                print(f"  [VAD] 人の声ではないため字幕にしません: 「{text}」")
+                await reject("VAD 人の声ではないため除外")
                 return
 
         direction = await loop.run_in_executor(None, estimate_direction, audio_amp)
@@ -531,8 +553,10 @@ async def pipeline_loop_streaming():
             if partial != last_partial_text:
                 last_partial_text = partial
                 last_partial_change_time = now
-                # 人の声だと判定できている時だけ画面に出す（雑音由来の途中経過は表示しない）
-                if partial and _vad_is_speech:
+                # 画面に出すのは「人の声だと判定できていて、かつゴミではない」時だけ。
+                # 確定時と同じ基準をここにもかけないと、確定時に捨てるはずのゴミが
+                # 途中経過として画面に出てしまい、そのまま残る（＝ターミナルは正しいのに画面だけ変になる）。
+                if partial and _vad_is_speech and garbage_reason(partial) is None:
                     # 全文が読める段階（確定前）でも先に画面へ送る。確定を待つと
                     # 実際には損をしていない時間（0.87秒 vs 1.50秒、先生の資料より）を待つことになるため。
                     direction = estimate_direction(amplified)

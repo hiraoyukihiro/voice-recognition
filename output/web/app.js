@@ -65,6 +65,15 @@ function addSubtitle(text, direction, isFinal = true) {
   if (settings.subtitle_view === "windows") moveSubtitleTo(direction);
 }
 
+// 認識中だった行を取り消して消す。
+// Python側が「やっぱりこれは雑音だった」と判断した時に呼ばれる。
+// これがないと、途中経過として出した字幕が画面に残りっぱなしになる。
+function cancelPendingSubtitle() {
+  if (!currentPendingLine) return;
+  currentPendingLine.remove();
+  currentPendingLine = null;
+}
+
 // windowsビュー: 論文では話者の上に字幕を置く。ここはARではないので、
 // 「話している方向」を字幕の左右位置で表す近似にする。
 function moveSubtitleTo(deg) {
@@ -181,6 +190,10 @@ function handle(data) {
     case "config":
       settings = { ...settings, ...data };
       applyView();
+      break;
+
+    case "subtitle_cancel":
+      cancelPendingSubtitle();
       break;
 
     case "sound_event":
