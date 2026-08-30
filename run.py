@@ -417,7 +417,9 @@ async def recorder_loop_streaming(queue: asyncio.Queue):
 # これだけ変化しなければ「話が一段落した」とみなして先に確定させる、という二段構えにする。
 # モデルの探索範囲を狭めて認識が2.7倍速くなった（実時間の74%→27%）ため、
 # 以前の1.5秒から短縮して字幕の確定を早めた（2026-08-27）。
-PARTIAL_STALL_TIMEOUT = 0.8
+# 必ず FRAME_DURATION より長くすること。短いと、次のフレームが届いた瞬間に
+# 「変化がない」と判定されて文の途中で毎回切れてしまう。
+PARTIAL_STALL_TIMEOUT = 1.5
 
 
 async def pipeline_loop_streaming():

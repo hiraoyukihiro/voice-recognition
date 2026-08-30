@@ -31,7 +31,11 @@ CHANNELS = 1              # モノラル
 # False: 従来方式（CHUNK_DURATION秒ごとに強制的に区切ってから認識にかける）。
 #        何か問題があれば、ここをFalseにすればいつでも前の方式に戻せる。
 STREAMING_ASR = True
-FRAME_DURATION = 0.3      # 秒: ストリーミング方式でマイクから読み込む単位
+# 秒: ストリーミング方式でマイクから読み込む単位。
+# 0.3秒だと「テ」のような一瞬の破裂音が区切りに当たって分断され、「ベ」に化ける現象を確認した
+# （同じ録音でも 0.3秒刻み→「ベスト」、1.0秒刻み→「テスト」。2026-08-27実測）。
+# 長くすると子音が壊れにくくなるが、字幕が出るまでの間隔もその分伸びる。
+FRAME_DURATION = 1.0
 
 # --- 音声認識設定 ---
 WHISPER_ENGINE = "vosk"  # faster_whisper / whisper / vosk
@@ -54,7 +58,7 @@ VOSK_MODEL_PATH = r"C:\Users\user\vosk-models\vosk-model-ja-0.22"  # 大型モ�
 ENABLE_VAD = True
 VAD_THRESHOLD = 0.15  # 高いほど声と判定されにくい。0.5だと遠くの本物の声まで捨てたため0.15に（2026-08-27実測）
 VAD_CHECK_SECONDS = 1.5   # 直近何秒分を見て声かどうか判定するか
-VAD_CHECK_INTERVAL = 3    # 何フレームごとに判定し直すか（毎回やると重いため）
+VAD_CHECK_INTERVAL = 1    # 何フレームごとに判定し直すか。FRAME_DURATIONを1.0秒にしたので毎フレーム（＝1秒ごと）で十分軽い
 
 # --- 方向検知設定 ---
 # reSpeaker XVF3800実機のみ対応（ダミー実装は削除済み。未接続時は方向なし=常に0度で起動）。
