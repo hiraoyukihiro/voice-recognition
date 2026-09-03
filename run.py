@@ -917,10 +917,7 @@ async def main():
 
     print(f"[WebSocket] ws://{config.WEBSOCKET_HOST}:{config.WEBSOCKET_PORT}")
 
-    # 字幕ページをブラウザで直接開く（HTTP配信サーバーは廃止しWebSocketのみ使用）
-    page = os.path.join(os.path.dirname(os.path.abspath(__file__)), "output", "web", "index.html")
-    webbrowser.open(f"file:///{page}")
-    print(f"[ブラウザ] {page} を開きます\n")
+    # G2シミュレーター（localhost:5173）を使うため、古いブラウザ表示は自動起動しない
 
     # エンジンごとに最適な渡し方が違うので、ここで振り分ける。
     #   vosk    … 1音ずつ流し込んで途中結果ももらえる（ストリーミング方式）
