@@ -38,19 +38,31 @@ STREAMING_ASR = True
 FRAME_DURATION = 1.0
 
 # --- 音声認識設定 ---
-# faster_whisper / whisper / vosk
-# 2026-08-30、同じ実録音での比較で faster_whisper に変更した。
-#   Vosk    「ん ん はい さん の さん の の 熱い の の 熱中 の 熱中症 ね」  ← 単語は拾えるが文にできない
-#   whisper 「今日は熱中症に気をつけてください」                        ← 文になる
-# Voskの実装は残してあるので、ここを "vosk" に戻せばいつでも切り替えられる。
-WHISPER_ENGINE = "faster_whisper"
+# すぐ字幕を出す係。faster_whisper / whisper / vosk
+# Voskは「速いが文にできない」、Whisperは「正確だが1発話に約8秒」という正反対の性質。
+# そこで Vosk で即座に出し、あとから Whisper が書き直す二段構えにしている（下のCORRECT_*）。
+WHISPER_ENGINE = "vosk"
 
 # tiny / base / small / medium / large（whisper系エンジン使用時のみ）
-# 実測（実録音20秒、int8、4スレッド）:
-#   tiny  7.1秒 幻覚だらけで使い物にならない（小さい＝速い、ではない）
-#   base  2.8秒 文になる。実用範囲 ★採用
-#   small 7.7秒 最も正確だが、baseの2.75倍遅い
-WHISPER_MODEL = "base"
+# 実測（実録音4秒×5本、int8、4スレッド、2026-08-30）:
+#   tiny  幻覚だらけで使い物にならない（小さい＝速い、ではない）
+#   base  平均2.2秒。文にはなるが「給食室→追加」「熱中症→熱前」と言葉を作り変える
+#   small 平均9.1秒。正確（給食室・熱中症とも正解）
+WHISPER_MODEL = "small"
+
+# --- あとから書き直す係（二段構えの2段目） ---
+# Voskが即座に出した粗い字幕を、Whisperが聞き直して正しい文に置き換える。
+#
+# なぜ間に合うのか:
+#   Whisperは音声の長さに関係なく毎回約8秒かかる（内部で必ず30秒に引き伸ばすため）。
+#   「4秒の発話ごとに8秒」では追いつかないが、「15秒ぶんをまとめて8秒」なら余裕で間に合う。
+#   発話ごとではなく一定間隔でまとめて処理するのが要点。
+ENABLE_CORRECTION = True
+CORRECT_MODEL = "small"       # 書き直す係のモデル。正確さ優先なのでsmall
+CORRECT_INTERVAL = 15.0       # 秒: 何秒ごとに聞き直すか
+CORRECT_WINDOW = 15.0         # 秒: 一度に聞き直す長さ
+CORRECT_TIMEOUT = 20.0        # 秒: これを超えたら諦める（まれな暴走対策）
+CORRECT_MIN_SPEECH = 1.0      # 秒: この長さぶんも声がなければ聞き直さない（無音区間で無駄に動かさない）
 
 # --- 発話の区切り方（whisper系エンジン使用時） ---
 # Whisperは音声を必ず内部で30秒に引き伸ばして計算するため、短く刻んで何度も渡すと

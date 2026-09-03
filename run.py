@@ -200,6 +200,40 @@ def window_audio() -> np.ndarray:
     return buf[-need:] if len(buf) >= need else buf
 
 
+# --- あとから書き直す係（Whisperによる訂正） ---
+# Voskが即座に出した粗い字幕を、Whisperが聞き直して正しい文に置き換える。
+# ここには直近CORRECT_WINDOW秒ぶんの生音を貯めておく。
+# 発話ごとではなく一定間隔でまとめて処理するので、Whisperの「毎回約8秒」という
+# 固定費を15秒ぶんで割ることになり、CPUに余裕を持って間に合う。
+correction_buffer: collections.deque = collections.deque(
+    maxlen=int(config.SAMPLE_RATE * config.CORRECT_WINDOW)
+)
+
+corrector = None
+if config.ENABLE_CORRECTION:
+    try:
+        from processing.recognition.faster_whisper_asr import FasterWhisperASR
+        print(f"書き直す係({config.CORRECT_MODEL})を読み込み中...")
+        corrector = FasterWhisperASR(
+            model_size=config.CORRECT_MODEL,
+            language=config.WHISPER_LANGUAGE,
+            device=config.WHISPER_DEVICE,
+            compute_type=config.WHISPER_COMPUTE_TYPE,
+            cpu_threads=config.WHISPER_CPU_THREADS,
+        )
+        corrector.load()
+        print(f"  → 訂正: 有効（{config.CORRECT_INTERVAL:.0f}秒ごとに直近{config.CORRECT_WINDOW:.0f}秒を聞き直します）")
+    except Exception as e:
+        print(f"  → 訂正機能を読み込めませんでした（字幕はVoskのみで通常どおり動きます）: {e}")
+        corrector = None
+
+
+def remember_for_correction(frame: np.ndarray) -> None:
+    """あとで聞き直すために、生の音を貯めておく。"""
+    if corrector is not None:
+        correction_buffer.extend(frame)
+
+
 # --- WebSocketクライアント管理 ---
 clients: set = set()
 
@@ -310,6 +344,7 @@ async def recorder_loop(queue: asyncio.Queue):
     while True:
         audio = await loop.run_in_executor(None, record_chunk)
         recent_frames.append(audio)
+        remember_for_correction(audio)
         rms = float(np.sqrt(np.mean(audio ** 2)))
         seq += 1
         if rms < SILENCE_THRESHOLD:
@@ -427,6 +462,7 @@ async def recorder_loop_streaming(queue: asyncio.Queue):
         frame = await loop.run_in_executor(None, record_frame)
         # 音イベント検知は増幅前の生の音を使う（音量の判定を狂わせないため）
         recent_frames.append(frame)
+        remember_for_correction(frame)
         if queue.full():
             try:
                 queue.get_nowait()
