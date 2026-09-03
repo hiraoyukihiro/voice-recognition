@@ -48,7 +48,7 @@ WHISPER_ENGINE = "faster_whisper"
 #   tiny  幻覚だらけで使い物にならない（小さい＝速い、ではない）
 #   base  平均2.2秒。文にはなるが「給食室→追加」「熱中症→熱前」と言葉を作り変える
 #   small 平均9.1秒。正確（給食室・熱中症とも正解）
-WHISPER_MODEL = "small"
+WHISPER_MODEL = "base"
 
 # --- あとから書き直す係（二段構えの2段目） ---
 # Voskが即座に出した粗い字幕を、Whisperが聞き直して正しい文に置き換える。
@@ -81,7 +81,7 @@ UTTERANCE_SILENCE_HOLD = 0.6    # 秒: これだけ静かになったら「話�
 UTTERANCE_MIN_SECONDS = 0.4     # 秒: これより短い音は発話とみなさず捨てる
 UTTERANCE_MAX_SECONDS = 15.0    # 秒: 話し続けている場合でも、ここで一度区切る
 UTTERANCE_FRAME = 0.2           # 秒: マイクから読む単位。短いほど区切りの判定が速い
-WHISPER_TIMEOUT = 6.0           # 秒: これを超えたら諦めて次へ進む（まれに起きる暴走対策）
+WHISPER_TIMEOUT = 10.0           # 秒: これを超えたら諦めて次へ進む（まれに起きる暴走対策）
 WHISPER_LANGUAGE = "ja"   # 日本語固定（Noneで自動検出）
 WHISPER_DEVICE = "cpu"
 WHISPER_COMPUTE_TYPE = "int8"  # CPUでの高速化（faster_whisper使用時のみ有効）
