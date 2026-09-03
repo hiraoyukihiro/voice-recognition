@@ -4,11 +4,25 @@
 実行: python run.py
 ブラウザで output/web/index.html が自動で開く（配信サーバーは使わずファイルを直接開く）。
 """
+import os
+
+# ★ここは他のimportより先に置くこと（読み込んだ後では効かない）★
+#
+# このアプリは Vosk(Kaldi) / Whisper(CTranslate2) / PyTorch(VAD・音イベント検知) という
+# 3つの独立したライブラリを1つのプログラムに同居させている。
+# それぞれが独自の並列処理エンジン(OpenMP)を持ち込むため、そのまま動かすと
+# 同じCPUを別々の管理者が奪い合う状態になり、**エラーメッセージを一切残さずに
+# 突然終了する**ことがある（実測: 終了コード255・116で3回発生。2026-08-30）。
+#
+# KMP_DUPLICATE_LIB_OK … 並列処理エンジンが二重に読み込まれても止めずに続行させる
+# OMP_NUM_THREADS       … 各ライブラリが勝手に全スレッドを取りに行くのを防ぐ
+os.environ.setdefault("KMP_DUPLICATE_LIB_OK", "TRUE")
+os.environ.setdefault("OMP_NUM_THREADS", "2")
+
 import asyncio
 import time
 import webbrowser
 import traceback
-import os
 import sys
 import numpy as np
 import sounddevice as sd
@@ -93,6 +107,39 @@ else:
 
 SILENCE_THRESHOLD = _active_mic_profile["silence_threshold"]
 MAX_GAIN = _active_mic_profile["max_gain"]
+
+# --- メモリの空き確認 ---
+# このアプリは複数のAIモデルを同時に積むため、実測で約2.8GB使う。
+#   Vosk大型 1677MB / 音イベント検知 609MB / Whisper small 514MB / VAD 7MB
+# 空きが足りないまま起動すると、途中で警告もなく落ちることがあるので先に知らせる。
+def _print_memory_status():
+    import ctypes
+
+    class _MemStatus(ctypes.Structure):
+        _fields_ = [("length", ctypes.c_ulong), ("load", ctypes.c_ulong),
+                    ("total", ctypes.c_ulonglong), ("avail", ctypes.c_ulonglong),
+                    ("totalPage", ctypes.c_ulonglong), ("availPage", ctypes.c_ulonglong),
+                    ("totalVirt", ctypes.c_ulonglong), ("availVirt", ctypes.c_ulonglong),
+                    ("availExt", ctypes.c_ulonglong)]
+
+    st = _MemStatus()
+    st.length = ctypes.sizeof(_MemStatus)
+    ctypes.windll.kernel32.GlobalMemoryStatusEx(ctypes.byref(st))
+    free_gb = st.avail / 1e9
+
+    need_gb = 1.7 + 0.6 + (0.6 if config.ENABLE_CORRECTION else 0.0)
+    print(f"  → メモリの空き: {free_gb:.1f}GB（このアプリはおよそ{need_gb:.1f}GB使います）")
+    if free_gb < need_gb + 0.5:
+        print()
+        print("  ⚠️ メモリの空きが足りません。途中で落ちる可能性があります。")
+        print("     対処: 他のアプリ（ブラウザのタブなど）を閉じる")
+        print("           または config.py で以下のどちらかを False にする")
+        print("           ENABLE_SOUND_EVENT = False  … 音イベント検知を止める（約0.6GB節約）")
+        print("           ENABLE_CORRECTION  = False  … 字幕の書き直しを止める（約0.6GB節約）")
+        print()
+
+
+_print_memory_status()
 
 # --- モデルロード ---
 print("=" * 50)

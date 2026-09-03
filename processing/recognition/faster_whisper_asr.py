@@ -61,7 +61,7 @@ class FasterWhisperASR(TranscriberBase):
             repetition_penalty=1.15,
             # 暴走時の最悪ケースを短くするための上限。
             # 音声1秒あたり日本語で20文字も出れば十分（普通の会話は5〜8文字/秒）。
-            max_new_tokens=max(48, int(len(audio) / sample_rate * 20)),
+            max_new_tokens=min(448, max(48, int(len(audio) / sample_rate * 20))),
         )
         text = "".join(
             seg.text for seg in segments if seg.no_speech_prob < _NO_SPEECH_PROB_THRESHOLD
