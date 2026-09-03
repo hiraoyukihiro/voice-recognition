@@ -41,7 +41,7 @@ FRAME_DURATION = 1.0
 # すぐ字幕を出す係。faster_whisper / whisper / vosk
 # Voskは「速いが文にできない」、Whisperは「正確だが1発話に約8秒」という正反対の性質。
 # そこで Vosk で即座に出し、あとから Whisper が書き直す二段構えにしている（下のCORRECT_*）。
-WHISPER_ENGINE = "vosk"
+WHISPER_ENGINE = "faster_whisper"
 
 # tiny / base / small / medium / large（whisper系エンジン使用時のみ）
 # 実測（実録音4秒×5本、int8、4スレッド、2026-08-30）:
