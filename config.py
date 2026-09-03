@@ -38,8 +38,29 @@ STREAMING_ASR = True
 FRAME_DURATION = 1.0
 
 # --- 音声認識設定 ---
-WHISPER_ENGINE = "vosk"  # faster_whisper / whisper / vosk
-WHISPER_MODEL = "small"   # tiny / base / small / medium / large（whisper系エンジン使用時のみ）
+# faster_whisper / whisper / vosk
+# 2026-08-30、同じ実録音での比較で faster_whisper に変更した。
+#   Vosk    「ん ん はい さん の さん の の 熱い の の 熱中 の 熱中症 ね」  ← 単語は拾えるが文にできない
+#   whisper 「今日は熱中症に気をつけてください」                        ← 文になる
+# Voskの実装は残してあるので、ここを "vosk" に戻せばいつでも切り替えられる。
+WHISPER_ENGINE = "faster_whisper"
+
+# tiny / base / small / medium / large（whisper系エンジン使用時のみ）
+# 実測（実録音20秒、int8、4スレッド）:
+#   tiny  7.1秒 幻覚だらけで使い物にならない（小さい＝速い、ではない）
+#   base  2.8秒 文になる。実用範囲 ★採用
+#   small 7.7秒 最も正確だが、baseの2.75倍遅い
+WHISPER_MODEL = "base"
+
+# --- 発話の区切り方（whisper系エンジン使用時） ---
+# Whisperは音声を必ず内部で30秒に引き伸ばして計算するため、短く刻んで何度も渡すと
+# 計算力の大半を捨てることになる。そこで「話し終わるまで貯めてから1回で渡す」方式にする。
+# 静かになったことをVADで検知して区切るので、単語の途中で切れる心配もない。
+UTTERANCE_SILENCE_HOLD = 0.6    # 秒: これだけ静かになったら「話し終わった」とみなす
+UTTERANCE_MIN_SECONDS = 0.4     # 秒: これより短い音は発話とみなさず捨てる
+UTTERANCE_MAX_SECONDS = 15.0    # 秒: 話し続けている場合でも、ここで一度区切る
+UTTERANCE_FRAME = 0.2           # 秒: マイクから読む単位。短いほど区切りの判定が速い
+WHISPER_TIMEOUT = 6.0           # 秒: これを超えたら諦めて次へ進む（まれに起きる暴走対策）
 WHISPER_LANGUAGE = "ja"   # 日本語固定（Noneで自動検出）
 WHISPER_DEVICE = "cpu"
 WHISPER_COMPUTE_TYPE = "int8"  # CPUでの高速化（faster_whisper使用時のみ有効）

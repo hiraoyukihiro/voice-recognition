@@ -640,6 +640,123 @@ async def direction_loop():
         })
 
 
+async def pipeline_loop_utterance():
+    """
+    Whisper系エンジン用のパイプライン。
+    Voskと違い「1音ずつ流し込んで途中結果をもらう」ことができないため、
+    **話し終わるまで音を貯めて、1回でまとめて渡す**方式にする。
+
+    なぜ貯めるのか:
+      Whisperは渡された音を必ず内部で30秒に引き伸ばして計算する。
+      そのため2秒渡しても20秒渡しても処理時間はほぼ変わらない（実測 約2〜3秒）。
+      短く刻んで何度も渡すと、計算力の大半を捨てることになる。
+
+    どこで区切るのか:
+      音量ではなくVAD（人の声かどうかの判定）を使い、
+      UTTERANCE_SILENCE_HOLD秒だけ静かになったら「話し終わった」とみなす。
+      単語の途中で切れないので、Voskで起きた「テスト→ベスト」のような破綻がない。
+    """
+    loop = asyncio.get_event_loop()
+    frame_len = int(config.SAMPLE_RATE * config.UTTERANCE_FRAME)
+    min_len = int(config.SAMPLE_RATE * config.UTTERANCE_MIN_SECONDS)
+    max_len = int(config.SAMPLE_RATE * config.UTTERANCE_MAX_SECONDS)
+    silence_frames_needed = max(1, int(config.UTTERANCE_SILENCE_HOLD / config.UTTERANCE_FRAME))
+
+    def read_frame():
+        audio, overflowed = mic_stream.read(frame_len)
+        if overflowed:
+            print("  [警告] マイク入力バッファがオーバーフローしました")
+        return to_mono(audio)
+
+    print("\nマイクに向かって話しかけてください（Ctrl+C で停止、発話まとめ方式）\n")
+
+    speech_frames: list = []      # 発話中の音をここに貯める
+    silence_run = 0               # 静かなフレームが何回続いたか
+    diag_count, diag_max = 0, 0.0
+
+    async def flush(reason: str):
+        nonlocal speech_frames, silence_run
+        audio = np.concatenate(speech_frames) if speech_frames else np.zeros(0, dtype=np.float32)
+        speech_frames = []
+        silence_run = 0
+        if len(audio) < min_len:
+            return
+
+        peak = float(np.max(np.abs(audio))) or 1e-6
+        amp = np.clip(audio * min(TARGET_PEAK / peak, MAX_GAIN), -1.0, 1.0).astype(np.float32)
+
+        t0 = time.time()
+        try:
+            text = await asyncio.wait_for(
+                loop.run_in_executor(None, transcribe, amp),
+                timeout=config.WHISPER_TIMEOUT,
+            )
+        except asyncio.TimeoutError:
+            # まれに同じ言葉を作り続ける暴走が起きる。待ち続けると字幕が固まるので諦める。
+            print(f"  [打ち切り] {config.WHISPER_TIMEOUT}秒以内に終わらなかったため破棄しました")
+            return
+        elapsed = time.time() - t0
+
+        text = (text or "").strip()
+        if not text:
+            await broadcast({"type": "subtitle_cancel"})
+            return
+
+        garbage = garbage_reason(text)
+        if garbage:
+            print(f"  [{garbage}除外] 「{text}」")
+            await broadcast({"type": "subtitle_cancel"})
+            return
+
+        direction = await loop.run_in_executor(None, estimate_direction, amp)
+        print(f"[{direction:.0f}°] {text}   （発話{len(audio)/config.SAMPLE_RATE:.1f}秒 / 認識{elapsed:.1f}秒 / {reason}）")
+        await broadcast({
+            "type": "subtitle",
+            "text": text,
+            "direction": direction,
+            "is_final": True,
+        })
+
+    while True:
+        try:
+            frame = await loop.run_in_executor(None, read_frame)
+
+            diag_count += 1
+            diag_max = max(diag_max, float(np.sqrt(np.mean(frame ** 2))))
+            if diag_count >= int(30 / config.UTTERANCE_FRAME):
+                print(f"  [音量] 直近30秒の最大={diag_max:.4f} (0.02以上あれば声は十分届いています)")
+                diag_count, diag_max = 0, 0.0
+
+            # 人の声かどうかで区切る（音量だけでは物音と区別できないため）
+            if vad is not None:
+                is_speech = await loop.run_in_executor(
+                    None, vad.is_speech, frame, config.SAMPLE_RATE
+                )
+            else:
+                is_speech = float(np.sqrt(np.mean(frame ** 2))) >= SILENCE_THRESHOLD
+
+            if is_speech:
+                speech_frames.append(frame)
+                silence_run = 0
+                # 長く話し続けている場合も、どこかで区切って字幕を出す
+                if sum(len(f) for f in speech_frames) >= max_len:
+                    await flush("長さ上限")
+            elif speech_frames:
+                # 発話の直後の静けさも少しだけ含める（語尾が切れるのを防ぐ）
+                speech_frames.append(frame)
+                silence_run += 1
+                if silence_run >= silence_frames_needed:
+                    await flush("話し終わり")
+
+        except KeyboardInterrupt:
+            raise
+        except Exception:
+            traceback.print_exc()
+            speech_frames = []
+            silence_run = 0
+            continue
+
+
 async def main():
     # WebSocketサーバー起動
     for attempt in range(10):
@@ -662,9 +779,16 @@ async def main():
     webbrowser.open(f"file:///{page}")
     print(f"[ブラウザ] {page} を開きます\n")
 
-    use_streaming = config.STREAMING_ASR and config.WHISPER_ENGINE == "vosk"
-    if config.STREAMING_ASR and not use_streaming:
-        print("  → STREAMING_ASR=Trueですが、WHISPER_ENGINEがVoskではないため従来方式で動作します")
+    # エンジンごとに最適な渡し方が違うので、ここで振り分ける。
+    #   vosk    … 1音ずつ流し込んで途中結果ももらえる（ストリーミング方式）
+    #   whisper … 話し終わるまで貯めて1回で渡す（発話まとめ方式）
+    if config.WHISPER_ENGINE == "vosk":
+        pipeline = pipeline_loop_streaming if config.STREAMING_ASR else pipeline_loop
+        print(f"  → 認識方式: {'ストリーミング' if config.STREAMING_ASR else '固定長チャンク'}（Vosk）")
+    else:
+        pipeline = pipeline_loop_utterance
+        print(f"  → 認識方式: 発話まとめ（{config.WHISPER_ENGINE} / {config.WHISPER_MODEL}）"
+              f" 静かになって{config.UTTERANCE_SILENCE_HOLD}秒で区切ります")
 
     background = []
     if sound_detector is not None:
@@ -672,10 +796,7 @@ async def main():
     background.append(asyncio.create_task(direction_loop()))
 
     try:
-        if use_streaming:
-            await pipeline_loop_streaming()
-        else:
-            await pipeline_loop()
+        await pipeline()
     except (KeyboardInterrupt, asyncio.CancelledError):
         print("\n\n停止しました。")
     finally:

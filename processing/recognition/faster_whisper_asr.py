@@ -50,9 +50,18 @@ class FasterWhisperASR(TranscriberBase):
             language=self.language,
             condition_on_previous_text=False,
             beam_size=1,
-            vad_filter=True,
-            vad_parameters={"min_silence_duration_ms": 300, "threshold": 0.3},
-            no_speech_threshold=0.7,
+            # vad_filterは使わない。音声を細切れに分割してから1つずつ処理するため、
+            # Whisperの「必ず30秒に引き伸ばす」計算が分割数だけ繰り返されて遅くなる
+            # （実測: 5ファイル合計 27.9秒 → 17.4秒。2026-08-30）。
+            # 発話の区切りは run.py 側でVADを使って済ませてあるので、ここでは不要。
+            vad_filter=False,
+            no_speech_threshold=0.6,
+            # 同じ言葉を延々と作り続ける暴走（幻覚ループ）を抑える。
+            # 実測: 6回中1回、3秒の音声に15.8秒かかる暴走が起きた（2026-08-30）。
+            repetition_penalty=1.15,
+            # 暴走時の最悪ケースを短くするための上限。
+            # 音声1秒あたり日本語で20文字も出れば十分（普通の会話は5〜8文字/秒）。
+            max_new_tokens=max(48, int(len(audio) / sample_rate * 20)),
         )
         text = "".join(
             seg.text for seg in segments if seg.no_speech_prob < _NO_SPEECH_PROB_THRESHOLD
