@@ -219,10 +219,13 @@ if config.ENABLE_CORRECTION:
             language=config.WHISPER_LANGUAGE,
             device=config.WHISPER_DEVICE,
             compute_type=config.WHISPER_COMPUTE_TYPE,
-            cpu_threads=config.WHISPER_CPU_THREADS,
+            # 全スレッドを使うとVosk（速報字幕）から奪ってしまう。
+            # 実測では2スレッドでもほぼ同じ速度なので、あえて絞る。
+            cpu_threads=config.CORRECT_CPU_THREADS,
         )
         corrector.load()
-        print(f"  → 訂正: 有効（{config.CORRECT_INTERVAL:.0f}秒ごとに直近{config.CORRECT_WINDOW:.0f}秒を聞き直します）")
+        print(f"  → 訂正: 有効（{config.CORRECT_INTERVAL:.0f}秒ごとに直近{config.CORRECT_WINDOW:.0f}秒を聞き直します"
+              f" / {config.CORRECT_CPU_THREADS}スレッド）")
     except Exception as e:
         print(f"  → 訂正機能を読み込めませんでした（字幕はVoskのみで通常どおり動きます）: {e}")
         corrector = None
