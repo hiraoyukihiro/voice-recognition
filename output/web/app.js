@@ -65,6 +65,28 @@ function addSubtitle(text, direction, isFinal = true) {
   if (settings.subtitle_view === "windows") moveSubtitleTo(direction);
 }
 
+// あとから届く「書き直し」を反映する。
+// Voskが即座に出した粗い字幕を、Whisperが聞き直した正しい文で置き換える。
+// 直近の行をまとめて1行に差し替え、✓印で「これは確定版」だと分かるようにする。
+function applyCorrection(text, direction) {
+  currentPendingLine = null;
+  subtitleArea.textContent = "";
+
+  const line = document.createElement("div");
+  line.className = "subtitle-line corrected";
+
+  const mark = document.createElement("span");
+  mark.className = "subtitle-arrow";
+  mark.textContent = "✓" + directionToArrow(direction);
+
+  const textSpan = document.createElement("span");
+  textSpan.className = "subtitle-text";
+  textSpan.textContent = text;
+
+  line.append(mark, textSpan);
+  subtitleArea.appendChild(line);
+}
+
 // 認識中だった行を取り消して消す。
 // Python側が「やっぱりこれは雑音だった」と判断した時に呼ばれる。
 // これがないと、途中経過として出した字幕が画面に残りっぱなしになる。
@@ -194,6 +216,13 @@ function handle(data) {
 
     case "subtitle_cancel":
       cancelPendingSubtitle();
+      break;
+
+    case "correction":
+      if (typeof data.text === "string" && data.text) {
+        applyCorrection(data.text, data.direction || 0);
+        markSource(data.direction || 0, "speech");
+      }
       break;
 
     case "sound_event":

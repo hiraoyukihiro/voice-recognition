@@ -70,6 +70,16 @@ body {
   word-break: break-word;
 }
 
+/* あとからWhisperが聞き直して書き直した「確定版」の字幕。
+   Voskの速報版と見分けがつくよう、左に緑の線を入れる。 */
+.subtitle-line.corrected {
+  border-left: 4px solid #66bb6a;
+}
+
+.subtitle-line.corrected .subtitle-arrow {
+  color: #66bb6a;
+}
+
 /* ---------- ② 方向の円弧 ---------- */
 #compass {
   position: absolute;

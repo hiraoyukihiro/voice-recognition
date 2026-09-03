@@ -615,6 +615,63 @@ async def pipeline_loop_streaming():
             continue
 
 
+async def correction_loop():
+    """
+    一定間隔で「直近CORRECT_WINDOW秒」をWhisperに聞き直させ、
+    Voskが出した粗い字幕を正しい文に書き換える係。
+
+    発話ごとではなく一定間隔でまとめて動かすのが要点。
+    Whisperは音声の長さに関係なく毎回約8秒かかるため、
+    「4秒の発話ごとに8秒」では追いつかないが、「15秒ぶんに8秒」なら十分間に合う。
+    """
+    loop = asyncio.get_event_loop()
+    need = int(config.SAMPLE_RATE * config.CORRECT_MIN_SPEECH)
+
+    while True:
+        await asyncio.sleep(config.CORRECT_INTERVAL)
+        try:
+            if len(correction_buffer) < need:
+                continue
+            audio = np.array(correction_buffer, dtype=np.float32)
+
+            # 声がほとんど含まれていない区間は、聞き直すだけ無駄なので飛ばす
+            if vad is not None:
+                if not await loop.run_in_executor(None, vad.is_speech, audio, config.SAMPLE_RATE):
+                    continue
+
+            peak = float(np.max(np.abs(audio))) or 1e-6
+            amp = np.clip(audio * min(TARGET_PEAK / peak, MAX_GAIN), -1.0, 1.0).astype(np.float32)
+
+            t0 = time.time()
+            try:
+                text = await asyncio.wait_for(
+                    loop.run_in_executor(None, corrector.transcribe, amp, config.SAMPLE_RATE),
+                    timeout=config.CORRECT_TIMEOUT,
+                )
+            except asyncio.TimeoutError:
+                print(f"  [訂正] {config.CORRECT_TIMEOUT:.0f}秒以内に終わらなかったため今回は見送ります")
+                continue
+            elapsed = time.time() - t0
+
+            text = (text or "").strip()
+            if not text or garbage_reason(text):
+                continue
+
+            direction = await loop.run_in_executor(None, estimate_direction, amp)
+            print(f"  [訂正] ({elapsed:.1f}秒) 「{text}」")
+            await broadcast({
+                "type": "correction",
+                "text": text,
+                "direction": direction,
+                "seconds": len(audio) / config.SAMPLE_RATE,
+            })
+        except asyncio.CancelledError:
+            raise
+        except Exception:
+            traceback.print_exc()
+            continue
+
+
 async def sound_event_loop():
     """
     論文2.2節の再現。SOUND_EVENT_HOP秒ごとに直近1秒の音を判定し、
@@ -830,6 +887,8 @@ async def main():
     if sound_detector is not None:
         background.append(asyncio.create_task(sound_event_loop()))
     background.append(asyncio.create_task(direction_loop()))
+    if corrector is not None:
+        background.append(asyncio.create_task(correction_loop()))
 
     try:
         await pipeline()
