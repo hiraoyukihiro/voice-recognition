@@ -13,6 +13,7 @@ let settings = {
   sound_history: 3,
   arc_lifetime: 3.0,
   subtitle_lines: 3,
+  subtitle_expire: 8,
   subtitle_view: "subtitles",
 };
 
@@ -60,6 +61,15 @@ function addSubtitle(text, direction, isFinal = true) {
   line.className = `subtitle-line${isFinal ? "" : " pending"}`;
   line.querySelector(".subtitle-arrow").textContent = directionToArrow(direction);
   line.querySelector(".subtitle-text").textContent = text;
+
+  if (isFinal) {
+    const expireMs = (settings.subtitle_expire || 0) * 1000;
+    if (expireMs > 0) {
+      setTimeout(() => {
+        if (line.parentNode === subtitleArea) subtitleArea.removeChild(line);
+      }, expireMs);
+    }
+  }
 
   currentPendingLine = isFinal ? null : line;
   if (settings.subtitle_view === "windows") moveSubtitleTo(direction);

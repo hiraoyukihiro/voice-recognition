@@ -362,6 +362,7 @@ async def ws_handler(websocket, path=None):
             "max_sources": config.MAX_SOUND_SOURCES,
             "sound_history": config.SOUND_EVENT_HISTORY,
             "subtitle_lines": config.SUBTITLE_LINES,
+            "subtitle_expire": config.SUBTITLE_EXPIRE_SECONDS,
             "arc_lifetime": config.SOURCE_ARC_LIFETIME,
             "subtitle_view": config.SUBTITLE_VIEW,
         }, ensure_ascii=False))

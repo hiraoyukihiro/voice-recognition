@@ -149,4 +149,5 @@ MAX_SOUND_SOURCES = 4            # 同時に円弧を出す音源の最大数（
 DIRECTION_BROADCAST_INTERVAL = 0.2  # 秒: 方向を画面へ送り直す間隔
 SOURCE_ARC_LIFETIME = 3.0        # 秒: 音が止まってから円弧が消えるまでの時間
 SUBTITLE_LINES = 3               # 字幕を何行ぶん残すか（論文の既定は2行、このアプリの仕様は3行）
+SUBTITLE_EXPIRE_SECONDS = 8.0    # 秒: 字幕が確定してからこの秒数後に自動で消える（0=即削除、旧動作）
 SUBTITLE_VIEW = "subtitles"      # "subtitles"（画面固定）/ "windows"（方向に応じて配置）。画面でVキー切替可
