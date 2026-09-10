@@ -12,7 +12,7 @@ MIC_PROFILES = {
     # 2ch混線バグを追っていた時期に原因が分からず0.00003まで下げたが、バグ修正後に実測した
     # 話し声のRMSは0.057〜0.131。0.00003は声の2000分の1で、ほぼ全ての物音を声として扱ってしまい
     # 誤認識の原因になっていたため適正値に戻した（2026-08-27）。
-    "reSpeaker": {"silence_threshold": 0.005, "max_gain": 20.0},
+    "reSpeaker": {"silence_threshold": 0.02, "max_gain": 20.0},
     "USB Microphone": {"silence_threshold": 0.0045, "max_gain": 50.0},  # 音量が小さいマイク
 }
 DEFAULT_MIC_PROFILE = {"silence_threshold": 0.003, "max_gain": 20.0}  # 未知のマイク用の標準値
@@ -97,7 +97,7 @@ VOSK_MODEL_PATH = r"C:\Users\user\vosk-models\vosk-model-ja-0.22"  # 大型モ�
 # --- VAD設定（人の声かどうかの判定） ---
 # 音量だけではエアコンの音などと声を区別できず、Voskが雑音に無理やり文字を当てはめて
 # 意味不明な字幕を出してしまう。それを防ぐために「声かどうか」を判定してから認識にかける。
-ENABLE_VAD = True
+ENABLE_VAD = False
 VAD_THRESHOLD = 0.05  # 高いほど声と判定されにくい。0.5だと遠くの本物の声まで捨てたため0.15に（2026-08-27実測）
 VAD_CHECK_SECONDS = 1.5   # 直近何秒分を見て声かどうか判定するか
 VAD_CHECK_INTERVAL = 1    # 何フレームごとに判定し直すか。FRAME_DURATIONを1.0秒にしたので毎フレーム（＝1秒ごと）で十分軽い
