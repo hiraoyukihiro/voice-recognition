@@ -153,6 +153,38 @@ body {
   to   { opacity: 1; transform: translateY(0); }
 }
 
+/* ---------- 右上：押し出された行を5秒だけ残すエリア ---------- */
+#overflow-area {
+  position: absolute;
+  top: 45px;
+  right: 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  max-width: 48%;
+  align-items: flex-end;
+  pointer-events: none;
+  z-index: 10;
+}
+
+.overflow-line {
+  background: rgba(30, 30, 30, 0.88);
+  border-right: 3px solid #fff176;
+  border-radius: 6px;
+  padding: 6px 12px;
+  font-size: 20px;
+  line-height: 1.4;
+  color: #fff176;
+  text-align: right;
+  animation: overflow-fade 5s forwards;
+}
+
+@keyframes overflow-fade {
+  0%   { opacity: 1; }
+  70%  { opacity: 1; }
+  100% { opacity: 0; }
+}
+
 /* ---------- 状態表示 ---------- */
 #status-badge,
 #view-badge {

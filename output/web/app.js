@@ -33,6 +33,18 @@ function toSector(deg) {
 
 // ---------------- ① 字幕 ----------------
 const subtitleArea = document.getElementById("subtitle-area");
+const overflowArea = document.getElementById("overflow-area");
+
+// 3行を超えて押し出された行を右上に★付きで5秒表示する。
+function showOverflow(arrowText, text) {
+  const el = document.createElement("div");
+  el.className = "overflow-line";
+  el.textContent = `★ ${arrowText} ${text}`;
+  overflowArea.appendChild(el);
+  setTimeout(() => {
+    if (el.parentNode === overflowArea) overflowArea.removeChild(el);
+  }, 5000);
+}
 
 // 認識中（未確定）の行はこの変数が指す1行を書き換え続け、確定したら null に戻す。
 // これにより「今日」「今日の」「今日の授業」のように部分認識結果が変化するたびに
@@ -54,7 +66,11 @@ function addSubtitle(text, direction, isFinal = true) {
     subtitleArea.appendChild(line);
 
     while (subtitleArea.children.length > settings.subtitle_lines) {
-      subtitleArea.removeChild(subtitleArea.firstChild);
+      const oldest = subtitleArea.firstChild;
+      const arrowText = oldest.querySelector(".subtitle-arrow")?.textContent || "";
+      const bodyText  = oldest.querySelector(".subtitle-text")?.textContent  || "";
+      subtitleArea.removeChild(oldest);
+      if (bodyText) showOverflow(arrowText, bodyText);
     }
   }
 
