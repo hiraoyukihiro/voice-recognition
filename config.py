@@ -61,7 +61,7 @@ WHISPER_MODEL = "base"
 # CPUの配分（実測、2026-08-30）:
 #   Vosk(速報)45% + 音イベント検知28% + Whisper(訂正) = 合計100%を超えると全部が遅くなる。
 #   実際15秒間隔では訂正が7.5秒→10〜20秒に悪化したため、間隔を伸ばして32%まで下げた。
-ENABLE_CORRECTION = True
+ENABLE_CORRECTION = False
 CORRECT_MODEL = "small"       # 書き直す係のモデル。正確さ優先なのでsmall
 CORRECT_INTERVAL = 25.0       # 秒: 何秒ごとに聞き直すか（短くするとCPUを食う）
 # Whisperは長さに関係なく毎回約8秒なので、窓を広げても費用は同じ。
@@ -115,7 +115,7 @@ WEBSOCKET_PORT = 8765
 # --- 音イベント検知設定（HoloSound論文の再現）---
 # 「今どんな音が鳴ったか」（ノック、火災報知器、電話の着信など19種）を判定して字幕とは別枠で表示する。
 # 論文: Guo et al. "HoloSound: Combining Speech and Sound Identification for DHH Users on a HMD" (ASSETS 2020)
-ENABLE_SOUND_EVENT = True
+ENABLE_SOUND_EVENT = False
 SOUND_EVENT_ENGINE = "panns"     # 今はpannsのみ。差し替え時はprocessing/sound_event/に実装を足す
 
 # 論文2.2節: 16kHzで1秒ぶんのバッファを作り、スライディングウィンドウで判定し続ける。
