@@ -156,6 +156,15 @@ if config.WHISPER_ENGINE == "faster_whisper":
         compute_type=config.WHISPER_COMPUTE_TYPE,
         cpu_threads=config.WHISPER_CPU_THREADS,
     )
+elif config.WHISPER_ENGINE == "groq_whisper":
+    from processing.recognition.groq_asr import GroqWhisperASR
+    if not config.GROQ_API_KEY:
+        raise ValueError("config.py の GROQ_API_KEY が空です。APIキーを貼り付けてください。")
+    asr = GroqWhisperASR(
+        api_key=config.GROQ_API_KEY,
+        model=config.GROQ_MODEL,
+        language=config.WHISPER_LANGUAGE,
+    )
 elif config.WHISPER_ENGINE == "vosk":
     from processing.recognition.vosk_asr import VoskASR
     asr = VoskASR(model_path=config.VOSK_MODEL_PATH, sample_rate=config.SAMPLE_RATE)
