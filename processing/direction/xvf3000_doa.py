@@ -53,6 +53,12 @@ class XVF3000DOA(DirectionEstimatorBase):
         try:
             self._read_int(*DOAANGLE)
         except usb.core.USBError as e:
+            if e.errno == 13:
+                # WinUSBは1つのプログラムしか同時に開けない
+                raise RuntimeError(
+                    f"XVF3000は別のプログラムが使用中です（{e}）。"
+                    "run.py / check_xvf3000.py / G2DoaServer.exe のどれかが動いていないか確認し、閉じてからやり直してください。"
+                ) from e
             raise RuntimeError(
                 f"XVF3000のUSB制御に失敗しました（{e}）。"
                 "Zadigで SEEED Control (Interface 3) に WinUSB を入れてください。"
