@@ -165,6 +165,15 @@ elif config.WHISPER_ENGINE == "groq_whisper":
         model=config.GROQ_MODEL,
         language=config.WHISPER_LANGUAGE,
     )
+elif config.WHISPER_ENGINE == "deepgram":
+    from processing.recognition.deepgram_asr import DeepgramASR
+    if not config.DEEPGRAM_API_KEY:
+        raise ValueError("config.py の DEEPGRAM_API_KEY が空です。APIキーを貼り付けてください。")
+    asr = DeepgramASR(
+        api_key=config.DEEPGRAM_API_KEY,
+        model=config.DEEPGRAM_MODEL,
+        language=config.WHISPER_LANGUAGE,
+    )
 elif config.WHISPER_ENGINE == "vosk":
     from processing.recognition.vosk_asr import VoskASR
     asr = VoskASR(model_path=config.VOSK_MODEL_PATH, sample_rate=config.SAMPLE_RATE)
@@ -191,15 +200,19 @@ print("\n全モデルロード完了\n")
 # --- 方向検知 ---
 # reSpeaker実機のみ対応（ダミー実装は削除済み）。
 # 見つからない場合は方向検知なし（常に0度=正面扱い）で起動し、字幕機能はそのまま使える。
-from processing.direction.xvf3800_doa import XVF3800DOA
+if config.DOA_DEVICE == "xvf3000":
+    from processing.direction.xvf3000_doa import XVF3000DOA as _DOAClass
+    _doa_kwargs = dict(angle_offset=config.XVF3000_ANGLE_OFFSET, invert=config.XVF3000_INVERT)
+    _doa_name = "reSpeaker XVF3000"
+else:
+    from processing.direction.xvf3800_doa import XVF3800DOA as _DOAClass
+    _doa_kwargs = dict(angle_offset=config.XVF3800_ANGLE_OFFSET, invert=config.XVF3800_INVERT)
+    _doa_name = "reSpeaker XVF3800"
 
 doa = None
 for _attempt in range(5):
     try:
-        doa = XVF3800DOA(
-            angle_offset=config.XVF3800_ANGLE_OFFSET,
-            invert=config.XVF3800_INVERT,
-        )
+        doa = _DOAClass(**_doa_kwargs)
         break
     except RuntimeError as e:
         print(f"  reSpeaker検出リトライ中... ({_attempt + 1}/5) {e}")
@@ -211,7 +224,7 @@ else:
     # USBへの同期問い合わせを認識パイプラインのクリティカルパスから外すため、
     # バックグラウンドスレッドで0.1秒ごとに読み直してキャッシュする方式に切り替える
     doa.start()
-    print("  → 方向検知: reSpeaker XVF3800（実機、バックグラウンドポーリング0.1秒間隔）")
+    print(f"  → 方向検知: {_doa_name}（実機、バックグラウンドポーリング0.1秒間隔）")
 
 
 def estimate_direction(audio: np.ndarray) -> float:
@@ -835,6 +848,12 @@ async def pipeline_loop_utterance():
         if len(audio) < min_len:
             return
 
+        # 元音声の平均音量が低すぎる場合は雑音と判断して送らない
+        # （増幅前の平均RMSが閾値の2倍未満＝ほぼ無音か雑音）
+        raw_rms = float(np.sqrt(np.mean(audio ** 2)))
+        if raw_rms < SILENCE_THRESHOLD * 2.0:
+            return
+
         peak = float(np.max(np.abs(audio))) or 1e-6
         amp = np.clip(audio * min(TARGET_PEAK / peak, MAX_GAIN), -1.0, 1.0).astype(np.float32)
 
@@ -910,6 +929,19 @@ async def pipeline_loop_utterance():
             continue
 
 
+def lan_ip() -> str:
+    """このPCの同じWi-Fi内でのIPアドレスを調べる（実際には通信しない）。"""
+    import socket
+    s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+    try:
+        s.connect(("8.8.8.8", 80))
+        return s.getsockname()[0]
+    except OSError:
+        return "127.0.0.1"
+    finally:
+        s.close()
+
+
 async def main():
     # WebSocketサーバー起動
     for attempt in range(10):
@@ -926,6 +958,10 @@ async def main():
         sys.exit(1)
 
     print(f"[WebSocket] ws://{config.WEBSOCKET_HOST}:{config.WEBSOCKET_PORT}")
+    if config.WEBSOCKET_HOST == "0.0.0.0":
+        print("\n=== G2アプリの「PCのURL」に入れる URL（スマホと同じWi-Fiにいること） ===")
+        print(f"    ws://{lan_ip()}:{config.WEBSOCKET_PORT}")
+        print("=========================================================================\n")
 
     # G2シミュレーター（localhost:5173）を使うため、古いブラウザ表示は自動起動しない
 

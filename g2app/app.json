@@ -1,0 +1,17 @@
+{
+  "package_id": "com.iteen.g2dirsub",
+  "edition": "202601",
+  "name": "G2 方向+字幕",
+  "version": "0.2.0",
+  "min_app_version": "2.0.0",
+  "min_sdk_version": "0.0.10",
+  "entrypoint": "index.html",
+  "permissions": [
+    {
+      "name": "network",
+      "desc": "PCのreSpeaker(run.py)から、声の方向と字幕を同じWi-Fi経由で受け取ります。",
+      "whitelist": ["ws://192.168.128.182:8765", "ws://localhost:8765"]
+    }
+  ],
+  "supported_languages": ["ja", "en"]
+}

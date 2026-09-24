@@ -6,6 +6,12 @@
       "runtimeExecutable": "python",
       "runtimeArgs": ["tools/serve_web.py"],
       "port": 8080
+    },
+    {
+      "name": "G2シミュレーター",
+      "runtimeExecutable": "cmd",
+      "runtimeArgs": ["/c", "cd /d C:\\Users\\user\\Desktop\\evenhub-templates\\asr && npm run dev"],
+      "port": 5173
     }
   ]
 }

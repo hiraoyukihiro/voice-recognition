@@ -28,3 +28,13 @@ tools/dfu-util/
 
 # Voskモデル(数十MB〜1GB、公式サイトから別途ダウンロードするため除外)
 models/
+
+# G2アプリ（g2app/）の部品置き場とビルド結果（npm install / npm run pack で作り直せる）
+g2app/node_modules/
+g2app/dist/
+g2app/.env.local
+g2app/.env.*.local
+*.ehpk
+
+# APIキー（公開リポジトリなので絶対に送らない）
+local_secrets.py

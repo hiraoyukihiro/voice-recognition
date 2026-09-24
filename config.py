@@ -12,7 +12,7 @@ MIC_PROFILES = {
     # 2ch混線バグを追っていた時期に原因が分からず0.00003まで下げたが、バグ修正後に実測した
     # 話し声のRMSは0.057〜0.131。0.00003は声の2000分の1で、ほぼ全ての物音を声として扱ってしまい
     # 誤認識の原因になっていたため適正値に戻した（2026-08-27）。
-    "reSpeaker": {"silence_threshold": 0.02, "max_gain": 20.0},
+    "reSpeaker": {"silence_threshold": 0.013, "max_gain": 20.0},  # 雑音環境用の中間値（旧値0.02 → 一時0.008 → 0.013）
     "USB Microphone": {"silence_threshold": 0.0045, "max_gain": 50.0},  # 音量が小さいマイク
 }
 DEFAULT_MIC_PROFILE = {"silence_threshold": 0.003, "max_gain": 20.0}  # 未知のマイク用の標準値
@@ -41,11 +41,32 @@ FRAME_DURATION = 1.0
 # すぐ字幕を出す係。faster_whisper / whisper / vosk
 # Voskは「速いが文にできない」、Whisperは「正確だが1発話に約8秒」という正反対の性質。
 # そこで Vosk で即座に出し、あとから Whisper が書き直す二段構えにしている（下のCORRECT_*）。
-WHISPER_ENGINE = "groq_whisper"
+WHISPER_ENGINE = "deepgram"
+
+# --- APIキーの読み込み ---
+# このリポジトリはGitHubで公開されているため、キーはここに書かない。
+# local_secrets.py（.gitignore済み）か、同じ名前の環境変数から読む。
+def _secret(name: str) -> str:
+    import os
+    try:
+        import local_secrets
+        value = getattr(local_secrets, name, "")
+        if value:
+            return value
+    except ImportError:
+        pass
+    return os.environ.get(name, "")
+
 
 # --- Groq API 設定（WHISPER_ENGINE="groq_whisper"の時のみ使用） ---
-GROQ_API_KEY = ""   # ← ここに groq.com で発行した APIキー（gsk_...）を貼り付ける
+
+GROQ_API_KEY = _secret("GROQ_API_KEY")   # キーは local_secrets.py か環境変数に書く（config.pyに直書きしない）
 GROQ_MODEL = "whisper-large-v3-turbo"  # 速度と精度のバランスが良いモデル
+
+# --- Deepgram API 設定（WHISPER_ENGINE="deepgram"の時のみ使用） ---
+
+DEEPGRAM_API_KEY = _secret("DEEPGRAM_API_KEY")   # キーは local_secrets.py か環境変数に書く
+DEEPGRAM_MODEL = "nova-3"  # Deepgram 最新モデル（日本語対応）
 
 # tiny / base / small / medium / large（whisper系エンジン使用時のみ）
 # 実測（実録音4秒×5本、int8、4スレッド、2026-08-30）:
@@ -82,7 +103,7 @@ CORRECT_MIN_SPEECH = 1.0      # 秒: この長さぶんも声がなければ聞�
 # 計算力の大半を捨てることになる。そこで「話し終わるまで貯めてから1回で渡す」方式にする。
 # 静かになったことをVADで検知して区切るので、単語の途中で切れる心配もない。
 UTTERANCE_SILENCE_HOLD = 0.6    # 秒: これだけ静かになったら「話し終わった」とみなす
-UTTERANCE_MIN_SECONDS = 0.4     # 秒: これより短い音は発話とみなさず捨てる
+UTTERANCE_MIN_SECONDS = 0.7     # 秒: これより短い音は発話とみなさず捨てる（0.4→0.7:雑音バースト対策）
 UTTERANCE_MAX_SECONDS = 15.0    # 秒: 話し続けている場合でも、ここで一度区切る
 UTTERANCE_FRAME = 0.2           # 秒: マイクから読む単位。短いほど区切りの判定が速い
 WHISPER_TIMEOUT = 10.0           # 秒: これを超えたら諦めて次へ進む（まれに起きる暴走対策）
@@ -112,8 +133,16 @@ VAD_CHECK_INTERVAL = 1    # 何フレームごとに判定し直すか。FRAME_D
 XVF3800_ANGLE_OFFSET = 0.0  # 正面(0度)とのズレを補正する度数
 XVF3800_INVERT = False      # 回転方向が逆に感じる場合True
 
+# どのreSpeakerを使うか: "xvf3000"（Mic Array v2.0） / "xvf3800"
+DOA_DEVICE = "xvf3000"
+# reSpeaker XVF3000 使用時の校正パラメータ（正面から話して0度にならなければ90単位で試す）
+XVF3000_ANGLE_OFFSET = 0.0
+XVF3000_INVERT = False
+
 # --- 表示設定 ---
-WEBSOCKET_HOST = "localhost"
+# "0.0.0.0" = 同じWi-Fiのスマホ（G2アプリ）からも接続できるようにする。
+# PCの中だけで使うなら "localhost" に戻してよい。
+WEBSOCKET_HOST = "0.0.0.0"
 WEBSOCKET_PORT = 8765
 
 # --- 音イベント検知設定（HoloSound論文の再現）---
