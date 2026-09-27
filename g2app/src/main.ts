@@ -107,7 +107,17 @@ function clearHighlight() {
 const URL_KEY = 'g2.pcUrl'
 const DEFAULT_URL = (import.meta.env.VITE_PC_WS_URL as string | undefined) ?? 'ws://192.168.0.103:8765'
 
+// QRコードで読み込んだとき（PCから http://<PCのIP>:5173 で配信）は、
+// 配信元のPC＝run.pyのPCなので、住所が変わっても自動で合わせる
+function servedFromPc(): string | null {
+  const { protocol, hostname } = window.location
+  if (!protocol.startsWith('http') || !hostname || hostname === 'localhost') return null
+  return `ws://${hostname}:8765`
+}
+
 function loadUrl(): string {
+  const fromPc = servedFromPc()
+  if (fromPc) return fromPc
   try { return localStorage.getItem(URL_KEY) || DEFAULT_URL } catch { return DEFAULT_URL }
 }
 
