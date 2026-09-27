@@ -7,7 +7,7 @@
     "dev": "vite",
     "build": "tsc --noEmit && vite build",
     "preview": "vite preview",
-    "pack": "npm run build && evenhub pack app.json dist",
+    "pack": "npm run build && evenhub pack app.json dist -o g2-dirsub.ehpk --sdk-ver 0.0.10",
     "simulate": "evenhub-simulator http://localhost:5173"
   },
   "dependencies": {
