@@ -10,7 +10,7 @@
     {
       "name": "network",
       "desc": "PCのreSpeaker(run.py)から、声の方向と字幕を同じWi-Fi経由で受け取ります。",
-      "whitelist": ["ws://192.168.128.182:8765", "ws://localhost:8765"]
+      "whitelist": ["ws://192.168.0.103:8765", "ws://192.168.128.182:8765", "ws://localhost:8765"]
     }
   ],
   "supported_languages": ["ja", "en"]

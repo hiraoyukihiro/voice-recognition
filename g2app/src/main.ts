@@ -105,7 +105,7 @@ function clearHighlight() {
 
 // PC(run.py)のURL。スマホの画面で変えられ、次回のために覚えておく
 const URL_KEY = 'g2.pcUrl'
-const DEFAULT_URL = (import.meta.env.VITE_PC_WS_URL as string | undefined) ?? 'ws://192.168.128.182:8765'
+const DEFAULT_URL = (import.meta.env.VITE_PC_WS_URL as string | undefined) ?? 'ws://192.168.0.103:8765'
 
 function loadUrl(): string {
   try { return localStorage.getItem(URL_KEY) || DEFAULT_URL } catch { return DEFAULT_URL }
