@@ -782,6 +782,25 @@ async def sound_event_loop():
         await broadcast(payload)
 
 
+DOA_LABELS = ["↑ 前から声", "↗ 右前から声", "→ 右から声", "↘ 右後ろから声",
+              "↓ 後ろから声", "↙ 左後ろから声", "← 左から声", "↖ 左前から声"]
+DOA_SILENT_LABEL = "― 静か"
+DOA_HOLD_SECONDS = 1.5   # 声が止まってから「静か」に変えるまでの秒数（すぐ消えると読めないため）
+_doa_last = {"label": DOA_SILENT_LABEL, "voice_at": 0.0}
+
+
+def doa_message(angle: float, voice: bool) -> dict:
+    """G2DoaServer.exe と同じ形の方向メッセージを作る。"""
+    now = time.time()
+    if voice:
+        _doa_last["label"] = DOA_LABELS[round(angle / 45) % 8]
+        _doa_last["voice_at"] = now
+    elif now - _doa_last["voice_at"] > DOA_HOLD_SECONDS:
+        _doa_last["label"] = DOA_SILENT_LABEL
+    return {"type": "doa", "angle": round(angle), "voice": int(voice),
+            "label": _doa_last["label"], "ts": now}
+
+
 async def direction_loop():
     """
     方向を一定間隔で送り続ける係。字幕が出た瞬間だけでなく常に送ることで、
@@ -797,11 +816,15 @@ async def direction_loop():
             continue
         rms = float(np.sqrt(np.mean(audio ** 2)))
         active = rms >= SILENCE_THRESHOLD
+        angle = estimate_direction(audio)
+        # 元のG2アプリ「G2 字幕+方向」(jp.kikaku.g2doa) は G2DoaServer.exe と同じ
+        # {"type":"doa", angle, voice, label} の形で方向を受け取るので、それも送る
+        await broadcast(doa_message(angle, active))
         if not active:
             continue
         await broadcast({
             "type": "direction",
-            "direction": estimate_direction(audio),
+            "direction": angle,
             "level": rms,
         })
 
