@@ -65,47 +65,66 @@ function headerLine(): string {
   return directionHeadline(lastDirection)
 }
 
-// 字幕履歴（最大3行）
+// 字幕履歴（最大3行）。★が付いた行は、流れて消えるまで★のまま
 const MAX_HISTORY = 3
-const subtitleHistory: string[] = []
-const subtitleTimestamps: number[] = []  // 各行が届いた時刻（ミリ秒）
+interface SubtitleLine { text: string; at: number; star: boolean }
+const subtitleHistory: SubtitleLine[] = []
 let lastAddedFinal = ''
-let highlightTimer: number | null = null
 let interimLine = ''
-let highlightedLines: Set<number> | undefined = undefined
 
-function addToHistory(line: string) {
-  if (!line.trim()) return
-  subtitleHistory.push(line)
-  subtitleTimestamps.push(Date.now())
-  if (subtitleHistory.length > MAX_HISTORY) {
-    subtitleHistory.shift()
-    subtitleTimestamps.shift()
-  }
+// メガネのタップ（またはスマホの「聞き取れなかった」）で、押した前後2秒に届いた字幕を★で囲む。
+// 「前」はすでに届いている行に、「後」はこれから2秒以内に届く行に★を付ける
+const STAR_WINDOW_MS = 2000
+let starUntil = 0
+
+function starActive(): boolean {
+  return Date.now() <= starUntil
+}
+
+function addToHistory(text: string) {
+  if (!text.trim()) return
+  subtitleHistory.push({ text, at: Date.now(), star: starActive() })
+  if (subtitleHistory.length > MAX_HISTORY) subtitleHistory.shift()
+}
+
+function showLine(line: SubtitleLine): string {
+  return line.star ? `★${line.text}★` : line.text
+}
+
+function historyText(): string {
+  return subtitleHistory.map(showLine).join('\n')
+}
+
+function interimText(): string {
+  if (!interimLine) return ''
+  return starActive() ? `★${interimLine}★` : interimLine
 }
 
 // G2に出す全文: 1行目=方向、2行目=区切り、3行目以降=字幕
 function buildDisplay(): string {
-  const lines = subtitleHistory.map((line, i) =>
-    highlightedLines?.has(i) ? `★${line}★` : line
-  )
-  if (interimLine) lines.push(interimLine)
+  const lines = subtitleHistory.map(showLine)
+  if (interimLine) lines.push(interimText())
   const body = lines.length > 0 ? lines.join('\n') : 'Listening…'
-  const header = headerLine()
+  // ★の受付中は、押したことが分かるように方向の行の先頭にも★を出す
+  const header = (starActive() ? '★ ' : '') + headerLine()
   // 文字数上限に収めるときは、方向の行を残して字幕の古い方を削る
   return `${header}\n────────\n${body.slice(-(240 - header.length - 10))}`
 }
 
-function clearHighlight() {
-  if (highlightTimer !== null) { clearTimeout(highlightTimer); highlightTimer = null }
-  highlightedLines = undefined
-  setTranscript(subtitleHistory.join('\n'), '')
+function markStar() {
+  const now = Date.now()
+  for (const line of subtitleHistory) {
+    if (now - line.at <= STAR_WINDOW_MS) line.star = true
+  }
+  starUntil = now + STAR_WINDOW_MS
+  console.log('[★] 前後2秒の字幕に印を付けます')
+  setTranscript(historyText(), interimText())
   scheduleGlassesRender()
 }
 
 // PC(run.py)のURL。スマホの画面で変えられ、次回のために覚えておく
 const URL_KEY = 'g2.pcUrl'
-const DEFAULT_URL = (import.meta.env.VITE_PC_WS_URL as string | undefined) ?? 'ws://192.168.0.103:8765'
+const DEFAULT_URL = (import.meta.env.VITE_PC_WS_URL as string | undefined) ?? 'ws://192.168.0.116:8765'
 
 // QRコードで読み込んだとき（PCから http://<PCのIP>:5173 で配信）は、
 // 配信元のPC＝run.pyのPCなので、住所が変わっても自動で合わせる
@@ -180,9 +199,9 @@ function updateStatusBar() {
   if (!pcConnected) {
     setStatus('connecting', 'PCに接続中…（run.py を起動し、同じWi-Fiに）')
   } else if (lockedDirection !== null) {
-    setStatus('paused', `${directionLabel(lockedDirection)} に固定中 · タップで解除`)
+    setStatus('paused', `${directionLabel(lockedDirection)} に固定中 · スワイプで解除`)
   } else {
-    setStatus('listening', 'PC接続中 · タップで方向を固定 · ダブルタップで終了')
+    setStatus('listening', 'PC接続中 · タップで★ · スワイプで方向を固定 · ダブルタップで終了')
   }
 }
 
@@ -196,7 +215,7 @@ function connectPc(url: string) {
   try {
     stt = startSttStream(
       url,
-      ({ finalText, interimText, direction }) => {
+      ({ finalText, interimText: interim, direction }) => {
         if (direction != null) lastDirection = direction
 
         // 方向フィルタ：固定中かつ範囲外なら無視する
@@ -204,17 +223,15 @@ function connectPc(url: string) {
 
         const dirLabel = direction != null ? `${directionLabel(direction)} ` : ''
 
-        // 新しい確定字幕が届いたら履歴に追加する（強調中なら解除する）
+        // 新しい確定字幕が届いたら履歴に追加する（★の受付中なら★付きで入る）
         if (finalText && finalText !== lastAddedFinal) {
           lastAddedFinal = finalText
           addToHistory(`${dirLabel}${finalText}`)
-          if (highlightTimer !== null) { clearTimeout(highlightTimer); highlightTimer = null }
-          highlightedLines = undefined
         }
 
-        interimLine = interimText ? `${dirLabel}${interimText}` : ''
+        interimLine = interim ? `${dirLabel}${interim}` : ''
         // ブラウザ表示：履歴を final、途中経過を interim として渡す
-        setTranscript(subtitleHistory.join('\n'), interimLine)
+        setTranscript(historyText(), interimText())
         scheduleGlassesRender()
       },
       err => {
@@ -254,31 +271,10 @@ onConnectButton(url => {
 // ブラウザ上のボタンからもタップ・終了・強調を操作できるようにする
 onTapButton(() => toggleDirectionLock())
 
-onReplayButton(() => {
-  if (highlightTimer !== null) clearTimeout(highlightTimer)
-  const now = Date.now()
-  const highlighted = new Set(
-    subtitleTimestamps
-      .map((t, i) => ({ i, t }))
-      .filter(({ t }) => now - t <= 3000)
-      .map(({ i }) => i)
-  )
-  // 3秒以内に字幕がなければ直近1行を強調する
-  if (highlighted.size === 0 && subtitleHistory.length > 0) {
-    highlighted.add(subtitleHistory.length - 1)
-  }
-  highlightedLines = highlighted
-  setTranscript(
-    subtitleHistory.map((line, i) => highlighted.has(i) ? `★${line}★` : line).join('\n'),
-    ''
-  )
-  scheduleGlassesRender()
-  // 8秒後に自動で強調を解除する
-  highlightTimer = window.setTimeout(clearHighlight, 8000)
-})
+onReplayButton(() => markStar())
 
 
-// タップ → 方向を固定 / 解除
+// スワイプ → 方向を固定 / 解除
 function toggleDirectionLock() {
   if (!stt) return
   if (lockedDirection === null) {
@@ -317,7 +313,16 @@ const unsubscribe = bridge.onEvenHubEvent(event => {
     return
   }
 
+  // タップ → 前後2秒の字幕を★で囲む
   if (sysType === OsEventTypeList.CLICK_EVENT || textType === OsEventTypeList.CLICK_EVENT) {
+    markStar()
+    return
+  }
+
+  // 上下どちらかにスワイプ → 方向を固定 / 解除
+  const swiped = [sysType, textType].some(t =>
+    t === OsEventTypeList.SCROLL_TOP_EVENT || t === OsEventTypeList.SCROLL_BOTTOM_EVENT)
+  if (swiped) {
     toggleDirectionLock()
     return
   }

@@ -27,8 +27,8 @@ export function mountUi() {
         <span id="final"></span><span id="interim" class="interim"></span>
       </section>
       <div class="sim-bar">
-        <button id="btn-tap" class="sim-btn">👆 タップ（方向を固定 / 解除）</button>
-        <button id="btn-replay" class="sim-btn sim-btn-replay">❓ 聞き取れなかった</button>
+        <button id="btn-tap" class="sim-btn">↕ スワイプ（方向を固定 / 解除）</button>
+        <button id="btn-replay" class="sim-btn sim-btn-replay">★ 聞き取れなかった（前後2秒）</button>
       </div>
     </main>
   `
