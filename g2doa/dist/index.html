@@ -1,0 +1,63 @@
+<!doctype html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>G2 字幕</title>
+  <style>
+    body { font-family: sans-serif; background: #111; color: #eee; margin: 16px; }
+    h3 { margin: 20px 0 6px; color: #9cf; }
+    input { width: 100%; font-size: 16px; padding: 8px; box-sizing: border-box; margin-bottom: 6px; }
+    button { font-size: 16px; padding: 8px 16px; margin: 4px 8px 4px 0; }
+    .status { margin: 6px 0; color: #9f9; }
+    #last { font-size: 24px; margin: 8px 0; }
+    #caption { font-size: 18px; margin: 8px 0; color: #ff9; }
+    #log { font-size: 12px; color: #aaa; max-height: 35vh; overflow: auto; }
+    small { color: #888; }
+  </style>
+  <script type="module" crossorigin src="/assets/app.js"></script>
+</head>
+<body>
+  <h2>G2 字幕 + 音の方向</h2>
+
+  <h3>字幕 (Deepgram または Groq に直接送る。PC 不要)</h3>
+  <input id="dgkey" type="password" placeholder="API キー (Deepgram 40文字 / Groq gsk_…)" autocomplete="off" />
+  <input id="lang" placeholder="言語 (ja / en / multi)" value="ja" />
+  <label>マイク:
+    <select id="mic" style="font-size:16px;padding:6px">
+      <option value="glasses">メガネ (G2)</option>
+      <option value="phone">スマホ / USB (XVF3000 を挿したとき)</option>
+    </select>
+  </label>
+  <button id="stt-start">字幕 開始</button>
+  <button id="stt-stop">停止</button>
+  <button id="clear">字幕クリア</button>
+  <div id="stt-status" class="status">停止</div>
+  <div id="caption"></div>
+  <div id="diag" style="color:#8cf;font-size:14px"></div>
+  <div style="margin-top:10px">
+    <label><input type="checkbox" id="hideself" /> 自分の声を省く</label>
+    <label style="margin-left:12px"><input type="checkbox" id="agc" /> 音量を自動増幅</label>
+    <select id="agclevel" style="font-size:16px;padding:6px;margin-left:8px">
+      <option value="weak">弱</option>
+      <option value="medium">中</option>
+      <option value="strong" selected>強</option>
+    </select>
+  </div>
+  <button id="self-speaker">いま話しているのは自分</button>
+  <button id="self-angle">この方向は自分</button>
+  <button id="self-reset">解除</button>
+  <div id="self-status" class="status">自分: 未設定</div>
+
+  <h3>音の方向 (任意)</h3>
+  <small>Android 補助アプリなら ws://127.0.0.1:8765、PC なら ws://PCのIP:8765</small>
+  <input id="doaurl" placeholder="ws://127.0.0.1:8765" />
+  <button id="doa-connect">接続</button>
+  <button id="doa-disconnect">切断</button>
+  <div id="doa-status" class="status">未接続</div>
+  <div id="last">–</div>
+
+  <h3>ログ</h3>
+  <div id="log"></div>
+</body>
+</html>

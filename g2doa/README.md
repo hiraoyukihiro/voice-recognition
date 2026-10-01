@@ -1,0 +1,23 @@
+# G2 字幕+方向（元のアプリ・jp.kikaku.g2doa）
+
+Even Hub の「音声認識」プロジェクトに入っていた元のアプリ。
+ソースコードが手元になかったため、完成品 `g2doa-customer.ehpk`（v0.3.9）から
+`tools/ehpk_unpack.py` で取り出し、読める形に整形したもの。
+
+| 場所 | 中身 |
+|---|---|
+| `dist/` | 今のアプリ本体。ここを直す（`dist/assets/app.js` が動きの本体） |
+| `original/` | 取り出したままの v0.3.9（比較用。直さない） |
+| `app.json` | 名札。package_id は元のプロジェクトと同じ `jp.kikaku.g2doa` |
+
+## 箱に詰める（Even Hub に上げるファイルを作る）
+
+```
+cd g2doa
+..\g2app\node_modules\.bin\evenhub pack app.json dist -o g2doa.ehpk --sdk-ver 0.0.15
+```
+
+上げ直すときは `app.json` の version を前より大きくする。
+
+## 変更履歴
+- v0.4.0: メガネのタップで「前後2秒の字幕を★で囲む」（前はタップで字幕を全部消していた。消すのはスマホの「字幕クリア」）
