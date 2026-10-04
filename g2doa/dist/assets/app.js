@@ -5994,7 +5994,7 @@ let S = "";
 // 「前」はすでに出ている行に、「後」はこれから2秒以内に確定する行に付ける。
 const Wt = []; // W の各行が確定した時刻（W と同じ順・同じ数）
 const STAR_MS = 2000;
-// ★が付いた字幕は、本文から抜いて画面下の「★枠」に移し、付いてからこの時間だけ見せる
+// ★が付いた字幕は、本文から抜いて方向の行のすぐ下（字幕の一番上）の「★枠」に移し、付いてからこの時間だけ見せる
 const STAR_HOLD_MS = 3000;
 const SL = []; // ★枠の字幕 { t: 本文, at: ★が付いた時刻 }
 let holdTimer = null;
@@ -6099,7 +6099,7 @@ const M = await Pe(),
   }),
   Yn = new G({
     xPosition: 0,
-    yPosition: Qt,
+    yPosition: Qt + STAR_H,
     width: 576,
     height: 288 - Qt - STAR_H,
     borderWidth: 0,
@@ -6112,7 +6112,7 @@ const M = await Pe(),
   }),
   starBox = new G({
     xPosition: 0,
-    yPosition: 288 - STAR_H,
+    yPosition: Qt,
     width: 576,
     height: STAR_H,
     borderWidth: 0,
