@@ -5966,7 +5966,7 @@ const On = "g2doa_dgKey",
   Xn = 2,
   Gn = "dir",
   Qt = 44,
-  STAR_H = 64,
+  STAR_H = 92, // ★枠の高さ。3行分（64だと2行しか入らず、3行目が隠れていた）
   STAR_ID = 3,
   STAR_NAME = "star",
   We = 4,
@@ -6029,8 +6029,9 @@ function markStar() {
 }
 // ★枠に出す文字（新しい方を残して最大 STAR_CHARS 文字）
 const STAR_CHARS = 110;
+const STAR_LINES = 3; // ★枠に入る行数。多いときは新しい方を残す
 function starText() {
-  let n = starFresh().map((e) => starWrap(e.t)).join("\n");
+  let n = starFresh().slice(-STAR_LINES).map((e) => starWrap(e.t)).join("\n");
   return (n.length > STAR_CHARS && (n = n.slice(n.length - STAR_CHARS)), n || " ");
 }
 function Xe(i, n) {
