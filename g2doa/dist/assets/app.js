@@ -5966,6 +5966,9 @@ const On = "g2doa_dgKey",
   Xn = 2,
   Gn = "dir",
   Qt = 44,
+  STAR_H = 64,
+  STAR_ID = 3,
+  STAR_NAME = "star",
   We = 4,
   Bn = 380,
   C = (i) => document.querySelector(i),
@@ -5991,39 +5994,44 @@ let S = "";
 // 「前」はすでに出ている行に、「後」はこれから2秒以内に確定する行に付ける。
 const Wt = []; // W の各行が確定した時刻（W と同じ順・同じ数）
 const STAR_MS = 2000;
-// ★が付いた行は、付いてから最低この時間は、新しい字幕に押し出されず・文字数制限でも削られずに残る
+// ★が付いた字幕は、本文から抜いて画面下の「★枠」に移し、付いてからこの時間だけ見せる
 const STAR_HOLD_MS = 3000;
-const Wk = []; // W の各行に★が付いた時刻（W と同じ順・同じ数。★なしは0）
-const held = (i) => Wk[i] > 0 && Date.now() - Wk[i] < STAR_HOLD_MS;
+const SL = []; // ★枠の字幕 { t: 本文, at: ★が付いた時刻 }
 let holdTimer = null;
-// 行数の上限を超えた分を、守られていない一番古い行から捨てる（守られた行は期限が来るまで残す）
-function trimW() {
-  while (W.length > We) {
-    let k = -1;
-    for (let q = 0; q < W.length; q++) if (!held(q)) { k = q; break; }
-    if (k < 0) break;
-    W.splice(k, 1); Wt.splice(k, 1); Wk.splice(k, 1);
-  }
-  // 守られている行が残っている間は、期限が切れた時にもう一度整理して描き直す
+const starFresh = () => SL.filter((e) => Date.now() - e.at < STAR_HOLD_MS);
+// 期限が切れた分を捨て、最後の1件が切れる時刻にもう一度描き直す
+function trimStar() {
+  const live = starFresh();
+  SL.length = 0;
+  SL.push(...live);
   clearTimeout(holdTimer);
-  let wait = 0;
-  for (let q = 0; q < W.length; q++)
-    if (held(q)) wait = Math.max(wait, STAR_HOLD_MS - (Date.now() - Wk[q]));
-  if (wait > 0) holdTimer = setTimeout(() => { trimW(); j(); }, wait + 50);
+  if (live.length)
+    holdTimer = setTimeout(() => { trimStar(); j(); }, STAR_HOLD_MS - (Date.now() - live[0].at) + 50);
 }
+const starWrap = (s) => (s.startsWith("★") ? s : `★${s}★`);
 let starUntil = 0;
 const starOn = () => Date.now() <= starUntil;
-const starWrap = (s) => (s.startsWith("★") ? s : `★${s}★`);
 function markStar() {
   const now = Date.now();
-  for (let i = 0; i < W.length; i++)
-    if (now - Wt[i] <= STAR_MS) ((W[i] = starWrap(W[i])), (Wk[i] = now));
+  // 押した前2秒に確定した本文の行を、★枠へ移す
+  for (let i = 0; i < W.length; )
+    if (now - Wt[i] <= STAR_MS) {
+      SL.push({ t: W[i], at: now });
+      W.splice(i, 1);
+      Wt.splice(i, 1);
+    } else i++;
   starUntil = now + STAR_MS;
-  p("★ 前後2秒の字幕に印");
+  p("★ 前後2秒の字幕を★枠へ");
+  trimStar();
   j();
-  // 受付が終わったら、途中経過の★を外すために描き直す
+  // 受付が終わったら、ヘッダーの★を外すために描き直す
   setTimeout(j, STAR_MS + 50);
-  trimW();
+}
+// ★枠に出す文字（新しい方を残して最大 STAR_CHARS 文字）
+const STAR_CHARS = 110;
+function starText() {
+  let n = starFresh().map((e) => starWrap(e.t)).join("\n");
+  return (n.length > STAR_CHARS && (n = n.slice(n.length - STAR_CHARS)), n || " ");
 }
 function Xe(i, n) {
   const e = `${i === null ? "" : String.fromCharCode(65 + (i % 26))}${n}`;
@@ -6031,17 +6039,9 @@ function Xe(i, n) {
 }
 function Ge() {
   const i = [];
-  // 文字数が上限を超えそうなら、守られていない古い行から先に落とす（★の行は3秒守る）
-  const keep = W.map((_, q) => q);
-  const len = () => keep.map((q) => W[q]).join("\n").length + (S ? S.length + 1 : 0);
-  while (len() > Bn) {
-    const d = keep.findIndex((q) => !held(q));
-    if (d < 0 || keep.length <= 1) break;
-    keep.splice(d, 1);
-  }
-  (i.push(...keep.map((q) => W[q])),
-    S && i.push(starOn() ? starWrap(S) : S),
-    W.length === 0 && !S && i.push(starOn() ? "★" : O));
+  (i.push(...W),
+    S && i.push(S),
+    W.length === 0 && !S && SL.length === 0 && i.push(O));
   let n = i.join(`
 `);
   return (n.length > Bn && (n = n.slice(n.length - Bn)), n || " ");
@@ -6075,10 +6075,10 @@ function Jn(i, n) {
   }
   const t = Xe(i.speaker, n) + i.text;
   if (i.final) {
-    (W.push(starOn() ? starWrap(t) : t),
-      Wt.push(Date.now()),
-      Wk.push(starOn() ? Date.now() : 0),
-      trimW());
+    if (starOn()) (SL.push({ t, at: Date.now() }), trimStar());
+    else
+      for (W.push(t), Wt.push(Date.now()); W.length > We;)
+        (W.shift(), Wt.shift());
     S = "";
   } else S = t;
   ((C("#caption").textContent = t), j());
@@ -6101,7 +6101,7 @@ const M = await Pe(),
     xPosition: 0,
     yPosition: Qt,
     width: 576,
-    height: 288 - Qt,
+    height: 288 - Qt - STAR_H,
     borderWidth: 0,
     borderColor: 2,
     paddingLength: 8,
@@ -6110,12 +6110,25 @@ const M = await Pe(),
     content: "字幕: スマホで API キーを入れて「開始」",
     isEventCapture: 1,
   }),
+  starBox = new G({
+    xPosition: 0,
+    yPosition: 288 - STAR_H,
+    width: 576,
+    height: STAR_H,
+    borderWidth: 0,
+    borderColor: 2,
+    paddingLength: 6,
+    containerID: STAR_ID,
+    containerName: STAR_NAME,
+    content: " ",
+    isEventCapture: 0,
+  }),
   ke = await M.createStartUpPageContainer(
-    new Pn({ containerTotalNum: 2, textObject: [Rn, Yn] }),
+    new Pn({ containerTotalNum: 3, textObject: [Rn, Yn, starBox] }),
   );
 if (ke !== 0) {
   const i = await M.rebuildPageContainer(
-    new Hn({ containerTotalNum: 2, textObject: [Rn, Yn] }),
+    new Hn({ containerTotalNum: 3, textObject: [Rn, Yn, starBox] }),
   );
   p(`rebuildPageContainer: ${i}`);
 } else p("page created");
@@ -6127,6 +6140,9 @@ async function Mn() {
     (kn = Date.now()),
     await M.textContainerUpgrade(
       new un({ containerID: In, containerName: Wn, content: Ge() }),
+    ),
+    await M.textContainerUpgrade(
+      new un({ containerID: STAR_ID, containerName: STAR_NAME, content: starText() }),
     ));
 }
 function j() {
@@ -6324,7 +6340,7 @@ xn && Tt();
 C("#stt-start").addEventListener("click", () => void Tt());
 C("#stt-stop").addEventListener("click", () => void en());
 C("#clear").addEventListener("click", () => {
-  ((W.length = 0), (Wt.length = 0), (Wk.length = 0), (S = ""), j());
+  ((W.length = 0), (Wt.length = 0), (SL.length = 0), (S = ""), j());
 });
 C("#mic").addEventListener("change", async () => {
   (await M.setLocalStorage(cn, U("#mic").value),
