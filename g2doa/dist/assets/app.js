@@ -5991,18 +5991,39 @@ let S = "";
 // 「前」はすでに出ている行に、「後」はこれから2秒以内に確定する行に付ける。
 const Wt = []; // W の各行が確定した時刻（W と同じ順・同じ数）
 const STAR_MS = 2000;
+// ★が付いた行は、付いてから最低この時間は、新しい字幕に押し出されず・文字数制限でも削られずに残る
+const STAR_HOLD_MS = 3000;
+const Wk = []; // W の各行に★が付いた時刻（W と同じ順・同じ数。★なしは0）
+const held = (i) => Wk[i] > 0 && Date.now() - Wk[i] < STAR_HOLD_MS;
+let holdTimer = null;
+// 行数の上限を超えた分を、守られていない一番古い行から捨てる（守られた行は期限が来るまで残す）
+function trimW() {
+  while (W.length > We) {
+    let k = -1;
+    for (let q = 0; q < W.length; q++) if (!held(q)) { k = q; break; }
+    if (k < 0) break;
+    W.splice(k, 1); Wt.splice(k, 1); Wk.splice(k, 1);
+  }
+  // 守られている行が残っている間は、期限が切れた時にもう一度整理して描き直す
+  clearTimeout(holdTimer);
+  let wait = 0;
+  for (let q = 0; q < W.length; q++)
+    if (held(q)) wait = Math.max(wait, STAR_HOLD_MS - (Date.now() - Wk[q]));
+  if (wait > 0) holdTimer = setTimeout(() => { trimW(); j(); }, wait + 50);
+}
 let starUntil = 0;
 const starOn = () => Date.now() <= starUntil;
 const starWrap = (s) => (s.startsWith("★") ? s : `★${s}★`);
 function markStar() {
   const now = Date.now();
   for (let i = 0; i < W.length; i++)
-    if (now - Wt[i] <= STAR_MS) W[i] = starWrap(W[i]);
+    if (now - Wt[i] <= STAR_MS) ((W[i] = starWrap(W[i])), (Wk[i] = now));
   starUntil = now + STAR_MS;
   p("★ 前後2秒の字幕に印");
   j();
   // 受付が終わったら、途中経過の★を外すために描き直す
   setTimeout(j, STAR_MS + 50);
+  trimW();
 }
 function Xe(i, n) {
   const e = `${i === null ? "" : String.fromCharCode(65 + (i % 26))}${n}`;
@@ -6010,7 +6031,15 @@ function Xe(i, n) {
 }
 function Ge() {
   const i = [];
-  (i.push(...W),
+  // 文字数が上限を超えそうなら、守られていない古い行から先に落とす（★の行は3秒守る）
+  const keep = W.map((_, q) => q);
+  const len = () => keep.map((q) => W[q]).join("\n").length + (S ? S.length + 1 : 0);
+  while (len() > Bn) {
+    const d = keep.findIndex((q) => !held(q));
+    if (d < 0 || keep.length <= 1) break;
+    keep.splice(d, 1);
+  }
+  (i.push(...keep.map((q) => W[q])),
     S && i.push(starOn() ? starWrap(S) : S),
     W.length === 0 && !S && i.push(starOn() ? "★" : O));
   let n = i.join(`
@@ -6046,8 +6075,10 @@ function Jn(i, n) {
   }
   const t = Xe(i.speaker, n) + i.text;
   if (i.final) {
-    for (W.push(starOn() ? starWrap(t) : t), Wt.push(Date.now()); W.length > We;)
-      (W.shift(), Wt.shift());
+    (W.push(starOn() ? starWrap(t) : t),
+      Wt.push(Date.now()),
+      Wk.push(starOn() ? Date.now() : 0),
+      trimW());
     S = "";
   } else S = t;
   ((C("#caption").textContent = t), j());
@@ -6293,7 +6324,7 @@ xn && Tt();
 C("#stt-start").addEventListener("click", () => void Tt());
 C("#stt-stop").addEventListener("click", () => void en());
 C("#clear").addEventListener("click", () => {
-  ((W.length = 0), (Wt.length = 0), (S = ""), j());
+  ((W.length = 0), (Wt.length = 0), (Wk.length = 0), (S = ""), j());
 });
 C("#mic").addEventListener("change", async () => {
   (await M.setLocalStorage(cn, U("#mic").value),
