@@ -65,9 +65,9 @@ function headerLine(): string {
   return directionHeadline(lastDirection)
 }
 
-// 字幕履歴（最大3行）。★が付いた行は、流れて消えるまで★のまま
+// 字幕履歴（★なしは最大3行）。★が付いた行は、付けてから3秒間だけ字幕の一番上に固定して残す
 const MAX_HISTORY = 3
-interface SubtitleLine { text: string; at: number; star: boolean }
+interface SubtitleLine { text: string; at: number; star: boolean; pinUntil: number }
 const subtitleHistory: SubtitleLine[] = []
 let lastAddedFinal = ''
 let interimLine = ''
@@ -75,24 +75,64 @@ let interimLine = ''
 // メガネのタップ（またはスマホの「聞き取れなかった」）で、押した前後2秒に届いた字幕を★で囲む。
 // 「前」はすでに届いている行に、「後」はこれから2秒以内に届く行に★を付ける
 const STAR_WINDOW_MS = 2000
+const STAR_PIN_MS = 3000
 let starUntil = 0
 
 function starActive(): boolean {
   return Date.now() <= starUntil
 }
 
+function isPinned(line: SubtitleLine): boolean {
+  return line.star && Date.now() <= line.pinUntil
+}
+
+// 固定が切れた行と、★なしで3行を超えた古い行を履歴から落とす（固定中の行は落とさない）
+function trimHistory() {
+  const now = Date.now()
+  for (let i = 0; i < subtitleHistory.length; i++) {
+    if (subtitleHistory.length - countPinned(now) <= MAX_HISTORY) break
+    if (!(subtitleHistory[i].star && now <= subtitleHistory[i].pinUntil)) {
+      subtitleHistory.splice(i, 1)
+      i--
+    }
+  }
+}
+
+function countPinned(now: number): number {
+  return subtitleHistory.filter((l) => l.star && now <= l.pinUntil).length
+}
+
 function addToHistory(text: string) {
   if (!text.trim()) return
-  subtitleHistory.push({ text, at: Date.now(), star: starActive() })
-  if (subtitleHistory.length > MAX_HISTORY) subtitleHistory.shift()
+  const star = starActive()
+  subtitleHistory.push({ text, at: Date.now(), star, pinUntil: star ? Date.now() + STAR_PIN_MS : 0 })
+  trimHistory()
+  if (star) scheduleUnpin()
+}
+
+// 固定が切れたら、元の並びに戻して描き直す
+function scheduleUnpin() {
+  setTimeout(() => {
+    trimHistory()
+    setTranscript(historyText(), interimText())
+    scheduleGlassesRender()
+  }, STAR_PIN_MS + 50)
 }
 
 function showLine(line: SubtitleLine): string {
   return line.star ? `★${line.text}★` : line.text
 }
 
+// 固定中の★の行を上に、残りを下に並べる（それぞれ古い順）
+function orderedHistory(): { pinned: string[]; rest: string[] } {
+  const pinned = subtitleHistory.filter(isPinned).map(showLine)
+  const rest = subtitleHistory.filter((l) => !isPinned(l)).map(showLine)
+  return { pinned, rest }
+}
+
 function historyText(): string {
-  return subtitleHistory.map(showLine).join('\n')
+  const { pinned, rest } = orderedHistory()
+  return [...pinned, ...rest].join('\n')
 }
 
 function interimText(): string {
@@ -100,26 +140,34 @@ function interimText(): string {
   return starActive() ? `★${interimLine}★` : interimLine
 }
 
-// G2に出す全文: 1行目=方向、2行目=区切り、3行目以降=字幕
+// G2に出す全文: 1行目=方向、2行目=区切り、3行目以降=字幕（★の固定行が先頭）
 function buildDisplay(): string {
-  const lines = subtitleHistory.map(showLine)
-  if (interimLine) lines.push(interimText())
-  const body = lines.length > 0 ? lines.join('\n') : 'Listening…'
+  const { pinned, rest } = orderedHistory()
+  if (interimLine) rest.push(interimText())
   // ★の受付中は、押したことが分かるように方向の行の先頭にも★を出す
   const header = (starActive() ? '★ ' : '') + headerLine()
-  // 文字数上限に収めるときは、方向の行を残して字幕の古い方を削る
-  return `${header}\n────────\n${body.slice(-(240 - header.length - 10))}`
+  // 文字数上限に収めるときは、方向の行と★の固定行を残して、普通の字幕の古い方を削る
+  const budget = 240 - header.length - 10
+  const pinnedText = pinned.join('\n')
+  const restBudget = Math.max(0, budget - pinnedText.length - (pinnedText ? 1 : 0))
+  const restText = rest.join('\n').slice(-restBudget)
+  const body = [pinnedText, restText].filter(Boolean).join('\n') || 'Listening…'
+  return `${header}\n────────\n${body.slice(-budget)}`
 }
 
 function markStar() {
   const now = Date.now()
   for (const line of subtitleHistory) {
-    if (now - line.at <= STAR_WINDOW_MS) line.star = true
+    if (now - line.at <= STAR_WINDOW_MS) {
+      line.star = true
+      line.pinUntil = now + STAR_PIN_MS
+    }
   }
   starUntil = now + STAR_WINDOW_MS
-  console.log('[★] 前後2秒の字幕に印を付けます')
+  console.log('[★] 前後2秒の字幕に印を付けます（3秒間、一番上に固定）')
   setTranscript(historyText(), interimText())
   scheduleGlassesRender()
+  scheduleUnpin()
 }
 
 // PC(run.py)のURL。スマホの画面で変えられ、次回のために覚えておく
