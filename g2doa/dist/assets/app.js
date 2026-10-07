@@ -6064,6 +6064,40 @@ function Ye(i) {
       )
     : !1;
 }
+// 方向の固定（追加）: メガネを上下どちらかにスワイプすると、そのとき声がしていた方向を固定し、
+// 固定した角度 ±LOCK_RANGE 度から来た声だけを字幕にする。もう一度スワイプで解除。
+// 声の角度は lt（PC / Android の方向検知が最後に「声あり」と判定した角度）を使う。
+const LOCK_RANGE = 30;
+let lockAngle = null;
+let lockMsg = "",
+  lockMsgTimer = null;
+function flashLockMsg(m) {
+  ((lockMsg = m), clearTimeout(lockMsgTimer));
+  lockMsgTimer = setTimeout(() => ((lockMsg = ""), sn()), 2500);
+  sn();
+}
+function toggleLock() {
+  if (lockAngle !== null) {
+    lockAngle = null;
+    (p("方向の固定を解除"), flashLockMsg("固定解除"));
+  } else if (lt === null) {
+    // 方向検知につながっていない、またはまだ声を拾っていない
+    (p("方向が分からないので固定できません（音の方向に接続してください）"),
+      flashLockMsg("方向が未取得のため固定できません"));
+  } else {
+    lockAngle = lt;
+    p(`方向を固定: ${Math.round(lockAngle)}° ±${LOCK_RANGE}°`);
+  }
+  (sn(), j());
+}
+// 固定中で、今の声の角度が範囲外なら true
+function outOfLock() {
+  return lockAngle !== null && lt !== null && Re(lt, lockAngle) > LOCK_RANGE;
+}
+function lockPrefix() {
+  if (lockMsg) return lockMsg + " ";
+  return lockAngle === null ? "" : `[固定${Math.round(lockAngle)}°±${LOCK_RANGE}] `;
+}
 function Jn(i, n) {
   if (i.final && !i.text) {
     ((S = ""), j());
@@ -6071,6 +6105,12 @@ function Jn(i, n) {
   }
   if ((i.speaker !== null && (pt = i.speaker), Ye(i))) {
     ((C("#caption").textContent = "(自分) " + i.text),
+      i.final && ((S = ""), j()));
+    return;
+  }
+  // 方向を固定中で、範囲外から来た声は字幕にしない（スマホ画面にだけ「範囲外」と出す）
+  if (outOfLock()) {
+    ((C("#caption").textContent = `(範囲外 ${Math.round(lt)}°) ` + i.text),
       i.final && ((S = ""), j()));
     return;
   }
@@ -6164,7 +6204,8 @@ let Vn = 0,
   An = "";
 async function qn() {
   ((tn = !1), (Vn = Date.now()));
-  const i = ft || " ";
+  // 方向の行の先頭に、固定中なら「[固定90°±30]」を付ける
+  const i = lockPrefix() + ft || " ";
   i !== An &&
     ((An = i),
     await M.textContainerUpgrade(
@@ -6445,6 +6486,11 @@ const $e = M.onEvenHubEvent((i) => {
   // タップ → 前後2秒の字幕を★で囲む（前は「字幕を全部消す」だった。消すのはスマホの「字幕クリア」で）
   if (t === E.CLICK_EVENT || e === E.CLICK_EVENT) {
     markStar();
+    return;
+  }
+  // 上か下にスワイプ（SCROLL_TOP_EVENT=1 / SCROLL_BOTTOM_EVENT=2）→ 方向の固定 / 解除
+  if (t === 1 || t === 2 || e === 1 || e === 2) {
+    toggleLock();
     return;
   }
   (t === E.SYSTEM_EXIT_EVENT || t === E.ABNORMAL_EXIT_EVENT) &&
