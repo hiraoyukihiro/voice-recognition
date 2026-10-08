@@ -5,10 +5,9 @@
 <title>G2 画面ミラー</title>
 <!--
   EvenG2 に映っている画面を、PC でそのまま見るためのページ。
-  スマホの「G2 字幕+方向」(v0.4.7〜) が、G2 に出した画面の中身を PC の start_app.bat(run.py) に送り、
-  run.py がこのページへ配り直す。
-  開き方: 「G2画面ミラー.bat」をダブルクリック（またはこのファイルを直接開く）
-  別のPCから見る時は g2_mirror.html?ws=ws://PCのIP:8765
+  スマホの「G2 字幕+方向」(v0.4.9〜) が、G2 に出した画面の中身を PC の 8767 番に送り、
+  ミラー係（G2MirrorServer.exe / tools/g2_mirror_server.py）がこのページへ配り直す。
+  開き方: G2MirrorServer.exe をダブルクリック（自動で http://localhost:8767/ が開く）
 -->
 <style>
   :root {
@@ -49,7 +48,9 @@
 </div>
 <script>
 // どこに接続するか（?ws= で変えられる。ふつうは同じPCの start_app.bat）
-const WS_URL = new URLSearchParams(location.search).get("ws") || "ws://localhost:8765";
+// ミラー係から開いた時（http://localhost:8767/）は、同じ場所につなぐ
+const WS_URL = new URLSearchParams(location.search).get("ws")
+  || (location.protocol.startsWith("http") ? `ws://${location.host}` : "ws://localhost:8767");
 const STALE_MS = 5000;   // これだけ画面が届かなければ「止まっている」と表示
 
 const $ = (id) => document.getElementById(id);
@@ -90,7 +91,7 @@ function updateStatus() {
   const stale = !lastAt || Date.now() - lastAt > STALE_MS;
   document.body.classList.toggle("stale", stale);
   let t;
-  if (!pcConnected) t = `PC（start_app.bat）に接続中… <b>${WS_URL}</b>`;
+  if (!pcConnected) t = `ミラー係（G2MirrorServer）に接続中… <b>${WS_URL}</b>`;
   else if (!lastAt) t = "PC には接続済み。スマホの「G2 字幕+方向」の「音の方向」を、この PC につなぐと映ります";
   else if (stale) t = `最後の画面から ${Math.round((Date.now() - lastAt) / 1000)} 秒（スマホのアプリが止まっているかも）`;
   else t = "<b>G2 の画面を表示中</b>";

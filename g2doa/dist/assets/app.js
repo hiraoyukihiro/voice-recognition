@@ -6176,13 +6176,55 @@ if (ke !== 0) {
 let kn = 0,
   $t = !1,
   Xt = null;
-// G2の画面ミラー（追加）: G2に出している3つの枠の中身を、「音の方向」でつないでいる PC にも送る。
-// PC の start_app.bat(run.py) が受け取り、output/web/g2_mirror.html に同じ画面を映す。
-// （G2DoaServer.exe は受け取らないので、ミラーは start_app.bat のときだけ）
+// G2の画面ミラー（追加）: G2に出している3つの枠の中身を、「音の方向」の PC の 8767 番にも送る。
+// PC のミラー係（G2MirrorServer.exe）が受け取り、ブラウザに同じ画面を映す。
+// 方向の接続（8765 番、G2DoaServer.exe など）とは別の接続にしてあるので、方向の係は何でもよい。
+const MIRROR_PORT = 8767;
+let mws = null,
+  mwsUrl = "",
+  mwsTimer = null;
+function mirrorUrlFrom(doaUrl) {
+  try {
+    const u = new URL(doaUrl.replace(/^ws/, "http"));
+    return `ws://${u.hostname}:${MIRROR_PORT}`;
+  } catch {
+    return "";
+  }
+}
+function openMirror() {
+  try {
+    mws = new WebSocket(mwsUrl);
+  } catch {
+    mws = null;
+    return;
+  }
+  mws.addEventListener("open", () => {
+    (p(`ミラー接続: ${mwsUrl}`), g2MirrorSend());
+  });
+  // ミラー係が起動していない時は、5秒ごとに静かにつなぎ直す（方向や字幕には影響させない）
+  mws.addEventListener("close", () => {
+    ((mws = null), mwsUrl && (mwsTimer = setTimeout(openMirror, 5000)));
+  });
+  mws.addEventListener("error", () => {});
+}
+function mirrorDisconnect() {
+  ((mwsUrl = ""), clearTimeout(mwsTimer));
+  if (mws) {
+    try {
+      mws.close();
+    } catch {}
+  }
+  mws = null;
+}
+function mirrorConnect(doaUrl) {
+  mirrorDisconnect();
+  mwsUrl = mirrorUrlFrom(doaUrl);
+  mwsUrl && openMirror();
+}
 function g2MirrorSend() {
   try {
-    if (!_ || _.readyState !== 1) return;
-    _.send(
+    if (!mws || mws.readyState !== 1) return;
+    mws.send(
       JSON.stringify({
         type: "g2_mirror",
         dir: lockPrefix() + ft || " ",
@@ -6400,7 +6442,7 @@ const xn = await M.getLocalStorage(On),
 En && (U("#mic").value = En);
 xn && (U("#dgkey").value = xn);
 U("#lang").value = Qe || "ja";
-Jt && ((U("#doaurl").value = Jt), fn(Jt));
+Jt && ((U("#doaurl").value = Jt), fn(Jt), mirrorConnect(Jt));
 xn && Tt();
 C("#stt-start").addEventListener("click", () => void Tt());
 C("#stt-stop").addEventListener("click", () => void en());
@@ -6454,10 +6496,10 @@ C("#self-reset").addEventListener("click", () => {
 });
 C("#doa-connect").addEventListener("click", async () => {
   const i = U("#doaurl").value.trim();
-  i && (await M.setLocalStorage(on, i), fn(i));
+  i && (await M.setLocalStorage(on, i), fn(i), mirrorConnect(i));
 });
 C("#doa-disconnect").addEventListener("click", async () => {
-  (rn(), await M.setLocalStorage(on, ""));
+  (rn(), mirrorDisconnect(), await M.setLocalStorage(on, ""));
 });
 function jn(i) {
   return i ? (i.eventType ?? E.CLICK_EVENT) : null;

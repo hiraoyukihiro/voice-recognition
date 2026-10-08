@@ -38,3 +38,6 @@ g2app/.env.*.local
 
 # APIキー（公開リポジトリなので絶対に送らない）
 local_secrets.py
+
+# ミラー係の exe（tools/g2_mirror_server.py から PyInstaller で作り直せる）
+G2MirrorServer.exe
