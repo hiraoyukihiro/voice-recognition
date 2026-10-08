@@ -1,0 +1,118 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<title>G2 画面ミラー</title>
+<!--
+  EvenG2 に映っている画面を、PC でそのまま見るためのページ。
+  スマホの「G2 字幕+方向」(v0.4.7〜) が、G2 に出した画面の中身を PC の start_app.bat(run.py) に送り、
+  run.py がこのページへ配り直す。
+  開き方: 「G2画面ミラー.bat」をダブルクリック（またはこのファイルを直接開く）
+  別のPCから見る時は g2_mirror.html?ws=ws://PCのIP:8765
+-->
+<style>
+  :root {
+    --bg: #0b0b0b;
+    --glass: #000;
+    --text: #3cfa44;      /* G2 は緑一色の表示 */
+    --muted: #8a8a8a;
+    --line: #2a2a2a;
+  }
+  html, body { margin: 0; height: 100%; background: var(--bg); color: #ddd;
+    font-family: "Yu Gothic UI", "Meiryo", system-ui, sans-serif; }
+  #wrap { display: flex; flex-direction: column; align-items: center; justify-content: center;
+    height: 100%; gap: 14px; padding: 16px; box-sizing: border-box; }
+  #frame { position: relative; }
+  /* G2 の画面と同じ 576×288 で作り、ウィンドウに合わせて拡大する */
+  #glass { position: absolute; left: 0; top: 0; width: 576px; height: 288px;
+    background: var(--glass); outline: 1px solid var(--line); transform-origin: 0 0;
+    overflow: hidden; border-radius: 6px; }
+  .box { position: absolute; left: 0; width: 576px; box-sizing: border-box; overflow: hidden;
+    color: var(--text); white-space: pre-wrap; word-break: break-all;
+    font-size: 19px; line-height: 26px; }
+  #dir  { top: 0; padding: 6px; }
+  #star { padding: 6px; }
+  #cap  { padding: 8px; }
+  #status { font-size: 14px; color: var(--muted); text-align: center; }
+  #status b { color: #ddd; font-weight: 600; }
+  .stale #glass { opacity: .45; }
+</style>
+</head>
+<body>
+<div id="wrap">
+  <div id="frame"><div id="glass">
+    <div id="dir"  class="box"></div>
+    <div id="star" class="box"></div>
+    <div id="cap"  class="box"></div>
+  </div></div>
+  <div id="status">接続中…</div>
+</div>
+<script>
+// どこに接続するか（?ws= で変えられる。ふつうは同じPCの start_app.bat）
+const WS_URL = new URLSearchParams(location.search).get("ws") || "ws://localhost:8765";
+const STALE_MS = 5000;   // これだけ画面が届かなければ「止まっている」と表示
+
+const $ = (id) => document.getElementById(id);
+let layout = { dirH: 44, starH: 92, width: 576, height: 288 };
+let lastAt = 0;
+let pcConnected = false;
+
+// 枠の位置を G2 と同じにする（方向 → ★枠 → 字幕 の順に上から並ぶ）
+function applyLayout() {
+  $("dir").style.height = layout.dirH + "px";
+  $("star").style.top = layout.dirH + "px";
+  $("star").style.height = layout.starH + "px";
+  $("cap").style.top = (layout.dirH + layout.starH) + "px";
+  $("cap").style.height = (layout.height - layout.dirH - layout.starH) + "px";
+  fit();
+}
+
+// ウィンドウいっぱいに、縦横比を保って拡大する
+function fit() {
+  const maxW = window.innerWidth - 32;
+  const maxH = window.innerHeight - 80;
+  const s = Math.max(0.5, Math.min(maxW / layout.width, maxH / layout.height));
+  $("glass").style.transform = `scale(${s})`;
+  $("frame").style.width = layout.width * s + "px";
+  $("frame").style.height = layout.height * s + "px";
+}
+
+function show(m) {
+  if (m.layout) { layout = { ...layout, ...m.layout }; applyLayout(); }
+  $("dir").textContent = (m.dir || "").trim() ? m.dir : "";
+  $("star").textContent = (m.star || "").trim() ? m.star : "";
+  $("cap").textContent = (m.cap || "").trim() ? m.cap : "";
+  lastAt = Date.now();
+  updateStatus();
+}
+
+function updateStatus() {
+  const stale = !lastAt || Date.now() - lastAt > STALE_MS;
+  document.body.classList.toggle("stale", stale);
+  let t;
+  if (!pcConnected) t = `PC（start_app.bat）に接続中… <b>${WS_URL}</b>`;
+  else if (!lastAt) t = "PC には接続済み。スマホの「G2 字幕+方向」の「音の方向」を、この PC につなぐと映ります";
+  else if (stale) t = `最後の画面から ${Math.round((Date.now() - lastAt) / 1000)} 秒（スマホのアプリが止まっているかも）`;
+  else t = "<b>G2 の画面を表示中</b>";
+  $("status").innerHTML = t;
+}
+
+function connect() {
+  let ws;
+  try { ws = new WebSocket(WS_URL); } catch { setTimeout(connect, 2000); return; }
+  ws.onopen = () => { pcConnected = true; updateStatus(); };
+  ws.onmessage = (ev) => {
+    let m; try { m = JSON.parse(ev.data); } catch { return; }
+    if (m.type === "g2_mirror") show(m);
+  };
+  ws.onclose = () => { pcConnected = false; updateStatus(); setTimeout(connect, 2000); };
+  ws.onerror = () => {};
+}
+
+window.addEventListener("resize", fit);
+setInterval(updateStatus, 1000);
+applyLayout();
+connect();
+</script>
+</body>
+</html>

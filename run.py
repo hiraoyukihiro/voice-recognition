@@ -390,11 +390,39 @@ async def ws_handler(websocket, path=None):
         }, ensure_ascii=False))
     except Exception:
         pass
+    # G2の画面ミラー: 途中から開いたPCの画面にも、最後のG2の画面をすぐ見せる
+    if last_g2_mirror is not None:
+        try:
+            await websocket.send(json.dumps(last_g2_mirror, ensure_ascii=False))
+        except Exception:
+            pass
     try:
-        await websocket.wait_closed()
+        # スマホのG2アプリから届く「G2に出している画面の中身」を受け取り、PCの画面へ配り直す
+        async for message in websocket:
+            if isinstance(message, (bytes, bytearray)):
+                continue
+            await relay_g2_mirror(message)
+    except websockets.ConnectionClosed:
+        pass
     finally:
         clients.discard(websocket)
         print(f"[ブラウザ切断] 残{len(clients)}台")
+
+
+# G2の画面ミラー（output/web/g2_mirror.html で見る）。最後に届いた画面を覚えておく
+last_g2_mirror = None
+
+
+async def relay_g2_mirror(message: str):
+    global last_g2_mirror
+    try:
+        data = json.loads(message)
+    except ValueError:
+        return
+    if isinstance(data, dict) and data.get("type") == "g2_mirror":
+        data["received_at"] = time.time()
+        last_g2_mirror = data
+        await broadcast(data)
 
 
 async def broadcast(payload: dict):

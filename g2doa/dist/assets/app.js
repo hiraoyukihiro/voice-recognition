@@ -6176,6 +6176,27 @@ if (ke !== 0) {
 let kn = 0,
   $t = !1,
   Xt = null;
+// G2の画面ミラー（追加）: G2に出している3つの枠の中身を、「音の方向」でつないでいる PC にも送る。
+// PC の start_app.bat(run.py) が受け取り、output/web/g2_mirror.html に同じ画面を映す。
+// （G2DoaServer.exe は受け取らないので、ミラーは start_app.bat のときだけ）
+function g2MirrorSend() {
+  try {
+    if (!_ || _.readyState !== 1) return;
+    _.send(
+      JSON.stringify({
+        type: "g2_mirror",
+        dir: lockPrefix() + ft || " ",
+        star: starText(),
+        cap: Ge(),
+        layout: { dirH: Qt, starH: STAR_H, width: 576, height: 288 },
+      }),
+    );
+  } catch {
+    // 接続がまだ用意されていない時などは何もしない（G2の表示には影響させない）
+  }
+}
+// 画面が変わらない間も2秒ごとに送る（PC側が「止まった」と勘ちがいしないように）
+setInterval(g2MirrorSend, 2000);
 async function Mn() {
   (($t = !1),
     (kn = Date.now()),
@@ -6184,7 +6205,8 @@ async function Mn() {
     ),
     await M.textContainerUpgrade(
       new un({ containerID: STAR_ID, containerName: STAR_NAME, content: starText() }),
-    ));
+    ),
+    g2MirrorSend());
 }
 function j() {
   $t = !0;
@@ -6210,7 +6232,8 @@ async function qn() {
     ((An = i),
     await M.textContainerUpgrade(
       new un({ containerID: Xn, containerName: Gn, content: i }),
-    ));
+    ),
+    g2MirrorSend());
 }
 function sn() {
   tn = !0;
@@ -6339,7 +6362,7 @@ function fn(i) {
     return;
   }
   (_.addEventListener("open", () => {
-    ((Z = 1e3), R(`接続済み: ${i}`), p("doa ws open"));
+    ((Z = 1e3), R(`接続済み: ${i}`), p("doa ws open"), g2MirrorSend());
   }),
     _.addEventListener("message", (n) => {
       if (typeof n.data == "string")
