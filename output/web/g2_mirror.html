@@ -78,7 +78,24 @@ function fit() {
   $("frame").style.height = layout.height * s + "px";
 }
 
+// 映す相手を1つに決める。スマホの中で古いアプリが裏で生き残っていると、
+// 何か所からも画面が届いて交互に切りかわるため、「いちばん新しく起動したアプリ」だけを映す。
+// 今の相手から 6 秒届かなくなったら、ほかの相手に切りかえてよい。
+const OWNER_TIMEOUT_MS = 6000;
+let owner = null; // { inst, started, at }
+function acceptFrom(m) {
+  if (!m.inst) return true;  // 名札のない古い版のアプリ（v0.5.0 以前）はそのまま映す
+  const now = Date.now();
+  const ownerAlive = owner && now - owner.at < OWNER_TIMEOUT_MS;
+  if (!ownerAlive || m.inst === owner.inst || (m.started || 0) > owner.started) {
+    owner = { inst: m.inst, started: m.started || 0, at: now };
+    return true;
+  }
+  return false;
+}
+
 function show(m) {
+  if (!acceptFrom(m)) return;
   if (m.layout) { layout = { ...layout, ...m.layout }; applyLayout(); }
   $("dir").textContent = (m.dir || "").trim() ? m.dir : "";
   $("star").textContent = (m.star || "").trim() ? m.star : "";

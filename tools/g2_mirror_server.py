@@ -28,10 +28,13 @@ PORT = 8767
 
 
 def page_path() -> str:
-    # exe の中に同梱した時と、ソースのまま動かした時の両方に対応する
-    base = getattr(sys, "_MEIPASS", None)
-    if base:
-        return os.path.join(base, "g2_mirror.html")
+    # exe の横に output/web/g2_mirror.html があればそれを使う（画面だけ直した時に exe を作り直さなくてよい）。
+    # なければ exe の中に同梱したもの、ソースのまま動かした時はリポジトリのものを使う
+    if getattr(sys, "frozen", False):
+        beside = os.path.join(os.path.dirname(sys.executable), "output", "web", "g2_mirror.html")
+        if os.path.exists(beside):
+            return beside
+        return os.path.join(sys._MEIPASS, "g2_mirror.html")
     return os.path.join(os.path.dirname(__file__), "..", "output", "web", "g2_mirror.html")
 
 
@@ -52,6 +55,26 @@ def lan_ips() -> list[str]:
 clients: set = set()
 last_mirror: dict | None = None
 
+# 映す相手（送り元の接続）を1つに決める。スマホの中で古いアプリが裏で生き残ったり、
+# 接続がたまったりすると、何本もの接続から別々の画面が届き、PC の画面が交互に切りかわるため。
+# 「いちばん新しく起動したアプリ」→ 同じなら「いちばん新しくつながった接続」を選ぶ。
+# 今の相手から OWNER_TIMEOUT 秒届かなければ、ほかの相手に切りかえてよい。
+OWNER_TIMEOUT = 6.0
+owner = {"ws": None, "key": (0, 0.0), "at": 0.0}
+connected_at: dict = {}
+
+
+def accept_from(ws, data: dict) -> bool:
+    now = time.time()
+    key = (data.get("started") or 0, connected_at.get(ws, 0.0))
+    alive = owner["ws"] in clients and now - owner["at"] < OWNER_TIMEOUT
+    if not alive or ws is owner["ws"] or key > owner["key"]:
+        if ws is not owner["ws"]:
+            print(f"[mirror] 映す相手を切りかえ（接続 {len(clients)} 本のうち、いちばん新しいもの）")
+        owner.update(ws=ws, key=key, at=now)
+        return True
+    return False
+
 
 async def broadcast(data: dict, skip=None):
     msg = json.dumps(data, ensure_ascii=False)
@@ -67,6 +90,7 @@ async def broadcast(data: dict, skip=None):
 async def handler(ws):
     global last_mirror
     clients.add(ws)
+    connected_at[ws] = time.time()
     print(f"[mirror] 接続 +1 （{len(clients)}）")
     try:
         if last_mirror is not None:
@@ -79,6 +103,8 @@ async def handler(ws):
             except ValueError:
                 continue
             if isinstance(data, dict) and data.get("type") == "g2_mirror":
+                if not accept_from(ws, data):
+                    continue
                 data["received_at"] = time.time()
                 last_mirror = data
                 await broadcast(data, skip=ws)
@@ -86,6 +112,7 @@ async def handler(ws):
         pass
     finally:
         clients.discard(ws)
+        connected_at.pop(ws, None)
         print(f"[mirror] 接続 -1 （{len(clients)}）")
 
 

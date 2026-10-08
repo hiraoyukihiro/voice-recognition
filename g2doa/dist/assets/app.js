@@ -6226,12 +6226,18 @@ function mirrorConnect(doaUrl) {
   mwsUrl = mirrorUrlFrom(doaUrl);
   mwsUrl && openMirror();
 }
+// このアプリが起動した時刻と、起動ごとの名札。スマホの中で前に起動したアプリが裏で生き残っていても、
+// PC 側は「いちばん新しく起動したもの」だけを映せるように、毎回いっしょに送る
+const MIRROR_STARTED = Date.now();
+const MIRROR_INST = Math.random().toString(36).slice(2, 10);
 function g2MirrorSend() {
   try {
     if (!mws || mws.readyState !== 1) return;
     mws.send(
       JSON.stringify({
         type: "g2_mirror",
+        inst: MIRROR_INST,
+        started: MIRROR_STARTED,
         dir: lockPrefix() + ft || " ",
         star: starText(),
         cap: Ge(),
