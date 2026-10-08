@@ -20,6 +20,7 @@ cd g2doa
 上げ直すときは `app.json` の version を前より大きくする。
 
 ## 変更履歴
+- v0.5.0: 方向の接続がPCに何十本もたまる不具合を修正（元の v0.3.9 からあった。古い接続の「切れた」合図で新しい接続を見失っていた。G2DoaServer.exe が「Set changed size during iteration」で止まる原因）。ミラーの接続も同じように修正
 - v0.4.9: ミラーを G2DoaServer.exe でも使えるように。画面は方向とは別に PC の 8767 番（G2MirrorServer.exe）へ送る
 - v0.4.8: （元に戻す用。中身は v0.3.9 と同じ。g2doa_元に戻す_v0.4.8.ehpk）
 - v0.4.7: G2の画面ミラー。G2に出している画面の中身を「音の方向」でつないだPC（start_app.bat）にも送り、PCで「G2画面ミラー.bat」を開くと同じ画面が見える

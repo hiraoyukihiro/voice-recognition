@@ -6192,23 +6192,28 @@ function mirrorUrlFrom(doaUrl) {
   }
 }
 function openMirror() {
+  mwsTimer = null;
+  let ws;
   try {
-    mws = new WebSocket(mwsUrl);
+    ws = new WebSocket(mwsUrl);
   } catch {
     mws = null;
     return;
   }
-  mws.addEventListener("open", () => {
-    (p(`ミラー接続: ${mwsUrl}`), g2MirrorSend());
+  mws = ws;
+  ws.addEventListener("open", () => {
+    ws === mws && (p(`ミラー接続: ${mwsUrl}`), g2MirrorSend());
   });
-  // ミラー係が起動していない時は、5秒ごとに静かにつなぎ直す（方向や字幕には影響させない）
-  mws.addEventListener("close", () => {
-    ((mws = null), mwsUrl && (mwsTimer = setTimeout(openMirror, 5000)));
+  // ミラー係が起動していない時は、5秒ごとに静かにつなぎ直す（方向や字幕には影響させない）。
+  // 古い接続の「切れた」合図は無視する（無視しないと接続が二重三重にたまる）
+  ws.addEventListener("close", () => {
+    if (ws !== mws) return;
+    ((mws = null), mwsUrl && !mwsTimer && (mwsTimer = setTimeout(openMirror, 5000)));
   });
-  mws.addEventListener("error", () => {});
+  ws.addEventListener("error", () => {});
 }
 function mirrorDisconnect() {
-  ((mwsUrl = ""), clearTimeout(mwsTimer));
+  ((mwsUrl = ""), clearTimeout(mwsTimer), (mwsTimer = null));
   if (mws) {
     try {
       mws.close();
@@ -6395,18 +6400,29 @@ function Ze(i) {
     : i.type === "caption" &&
       Jn({ text: i.text, final: i.final, speaker: i.speaker }, i.dir);
 }
+// 方向の接続（v0.5.0 で直した）: 前の接続の「切れた」合図が遅れて届くと、新しい接続を見失って
+// つながったまま放置し、さらに再接続を重ねて、PC 側に接続が何十本もたまっていた
+// （G2DoaServer.exe が「Set changed size during iteration」で止まる原因）。
+// 合図ごとに「今の接続かどうか」を確かめ、古い接続の合図は無視する。
 function fn(i) {
-  (_ && ((Mt = !0), _.close(), (_ = null)), (Mt = !1), R(`接続中: ${i}`));
+  (Bt && (clearTimeout(Bt), (Bt = null)),
+    _ && ((Mt = !0), _.close(), (_ = null)),
+    (Mt = !1),
+    R(`接続中: ${i}`));
+  let ws;
   try {
-    _ = new WebSocket(i);
+    ws = new WebSocket(i);
   } catch {
     R("URL が不正です");
     return;
   }
-  (_.addEventListener("open", () => {
-    ((Z = 1e3), R(`接続済み: ${i}`), p("doa ws open"), g2MirrorSend());
+  _ = ws;
+  (ws.addEventListener("open", () => {
+    ws === _ &&
+      ((Z = 1e3), R(`接続済み: ${i}`), p("doa ws open"), g2MirrorSend());
   }),
-    _.addEventListener("message", (n) => {
+    ws.addEventListener("message", (n) => {
+      if (ws !== _) return;
       if (typeof n.data == "string")
         try {
           Ze(JSON.parse(n.data));
@@ -6414,17 +6430,18 @@ function fn(i) {
           ((ft = n.data), j());
         }
     }),
-    _.addEventListener("close", () => {
+    ws.addEventListener("close", () => {
+      if (ws !== _) return; // 古い接続の合図。今の接続には関係ない
       if (((_ = null), (ft = ""), (Ot = ""), sn(), Mt)) {
         R("切断");
         return;
       }
       (R(`切断。${Z / 1e3}s 後に再接続`),
         (Bt = setTimeout(() => {
-          ((Z = Math.min(Z * 2, 3e4)), fn(i));
+          ((Bt = null), (Z = Math.min(Z * 2, 3e4)), fn(i));
         }, Z)));
     }),
-    _.addEventListener("error", () => p("doa ws error")));
+    ws.addEventListener("error", () => ws === _ && p("doa ws error")));
 }
 function rn() {
   (Bt && (clearTimeout(Bt), (Bt = null)),
