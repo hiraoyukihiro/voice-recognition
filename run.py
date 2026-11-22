@@ -235,7 +235,10 @@ def estimate_direction(audio: np.ndarray) -> float:
 # 「今どんな音が鳴ったか」（ノック・火災報知器・電話など19種）を字幕とは別に判定する係。
 # 直近の生音をここに貯めておき、SOUND_EVENT_HOP秒ごとに末尾1秒ぶんを判定にかける
 # （論文と同じスライディングウィンドウ方式）。
-_frames_per_window = max(1, int(np.ceil(config.SOUND_EVENT_WINDOW / config.FRAME_DURATION)))
+# 発話まとめ方式（Whisper/Groq/Deepgram）は UTTERANCE_FRAME 秒、ストリーミング方式（Vosk）は
+# FRAME_DURATION 秒ずつ読む。短い方に合わせて箱の数を決めないと1秒ぶんが溜まらない。
+_frame_sec = min(config.FRAME_DURATION, config.UTTERANCE_FRAME)
+_frames_per_window = max(1, int(np.ceil(config.SOUND_EVENT_WINDOW / _frame_sec)))
 recent_frames: collections.deque = collections.deque(maxlen=_frames_per_window + 1)
 
 sound_detector = None
@@ -944,6 +947,9 @@ async def pipeline_loop_utterance():
     while True:
         try:
             frame = await loop.run_in_executor(None, read_frame)
+            # 方向検知の係（direction_loop）はここに溜まった音を見る。
+            # 入れ忘れると window_audio() が空を返し続け、方向が一切出なくなる。
+            recent_frames.append(frame)
 
             diag_count += 1
             diag_max = max(diag_max, float(np.sqrt(np.mean(frame ** 2))))
