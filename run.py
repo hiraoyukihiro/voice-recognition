@@ -107,6 +107,7 @@ else:
 
 SILENCE_THRESHOLD = _active_mic_profile["silence_threshold"]
 MAX_GAIN = _active_mic_profile["max_gain"]
+DIRECTION_THRESHOLD = SILENCE_THRESHOLD * config.DIRECTION_THRESHOLD_RATIO
 
 # --- メモリの空き確認 ---
 # このアプリは複数のAIモデルを同時に積むため、実測で約2.8GB使う。
@@ -843,7 +844,7 @@ async def direction_loop():
         if len(audio) == 0:
             continue
         rms = float(np.sqrt(np.mean(audio ** 2)))
-        active = rms >= SILENCE_THRESHOLD
+        active = rms >= DIRECTION_THRESHOLD
         angle = estimate_direction(audio)
         # 元のG2アプリ「G2 字幕+方向」(jp.kikaku.g2doa) は G2DoaServer.exe と同じ
         # {"type":"doa", angle, voice, label} の形で方向を受け取るので、それも送る

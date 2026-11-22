@@ -180,6 +180,11 @@ SOUND_EVENT_HISTORY = 3          # 画面に残す音イベントの件数（論
 DIRECTION_SECTORS = 12           # 方向を何分割して表示するか（論文: 12方向）
 MAX_SOUND_SOURCES = 4            # 同時に円弧を出す音源の最大数（論文: 4）
 DIRECTION_BROADCAST_INTERVAL = 0.2  # 秒: 方向を画面へ送り直す間隔
+# 方向の「声あり」判定を字幕より何倍ゆるくするか（SILENCE_THRESHOLD に掛ける）。
+# 方向は1秒ぶんの平均音量で判定するため、言葉の間の無音で平均が下がり、
+# 字幕用のしきい値をそのまま使うと「― 静か」のままになって方向が出ない。
+# 誤った方向より「方向が出ない」ほうが困るので、方向側はゆるくする。
+DIRECTION_THRESHOLD_RATIO = 0.6
 SOURCE_ARC_LIFETIME = 3.0        # 秒: 音が止まってから円弧が消えるまでの時間
 SUBTITLE_LINES = 3               # 字幕を何行ぶん残すか（論文の既定は2行、このアプリの仕様は3行）
 SUBTITLE_EXPIRE_SECONDS = 8.0    # 秒: 字幕が確定してからこの秒数後に自動で消える（0=即削除、旧動作）
